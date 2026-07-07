@@ -1,0 +1,46 @@
+name: CI / Documentation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install apt dependencies (with retry)
+        uses: ./.github/actions/retry
+        with:
+          command: "sudo apt-get update && sudo apt-get install -y doxygen graphviz"
+      - name: Install Python dependencies
+        run: pip install -r doc/requirements.txt
+      - name: Sphinx build
+        run: sphinx-build -W -b html doc _build
+      - name: Generate release badge data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(gh api "repos/${{ github.repository }}/releases/latest" --jq .tag_name 2>/dev/null || true)"
+          if [ -z "${version}" ]; then
+            version="none"
+          fi
+          printf '{"schemaVersion":1,"label":"release","message":"%s","color":"blue"}\n' "${version}" > _build/release.json
+          echo "Generated _build/release.json: $(cat _build/release.json)"
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release' }}
+        with:
+          publish_branch: gh-pages
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: _build/
+          force_orphan: true

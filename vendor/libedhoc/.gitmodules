@@ -1,0 +1,18 @@
+[submodule "externals/mbedtls"]
+	path = externals/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git
+[submodule "externals/zcbor"]
+	path = externals/zcbor
+	url = https://github.com/NordicSemiconductor/zcbor.git
+[submodule "externals/compact25519"]
+	path = externals/compact25519
+	url = https://github.com/DavyLandman/compact25519.git
+[submodule "externals/Unity"]
+	path = externals/Unity
+	url = https://github.com/ThrowTheSwitch/Unity.git
+[submodule "externals/liboqs"]
+	path = externals/liboqs
+	url = https://github.com/open-quantum-safe/liboqs.git
+[submodule "externals/XKCP"]
+	path = externals/XKCP
+	url = https://github.com/XKCP/XKCP.git

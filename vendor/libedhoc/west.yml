@@ -1,0 +1,38 @@
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: github
+      url-base: https://github.com
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v4.2.0
+      import:
+        name-allowlist:
+          - zcbor
+          - mbedtls
+
+    - name: compact25519
+      remote: github
+      repo-path: DavyLandman/compact25519
+      revision: v1.1.0
+      path: modules/lib/compact25519
+
+    - name: liboqs
+      remote: github
+      repo-path: open-quantum-safe/liboqs
+      revision: 0.15.0
+      path: modules/lib/liboqs
+
+    - name: XKCP
+      remote: github
+      repo-path: XKCP/XKCP
+      revision: 78477d2e0b980737deaa07b928b29302257055ca
+      path: modules/lib/XKCP
+      submodules: true
+
+  self:
+    path: libedhoc
+

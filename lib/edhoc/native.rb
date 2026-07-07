@@ -1,0 +1,1 @@
+require "edhoc_native"

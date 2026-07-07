@@ -1,0 +1,3 @@
+This gem scaffold is MIT licensed.
+
+The vendored libedhoc project is MIT licensed. See vendor/libedhoc/LICENSE.
