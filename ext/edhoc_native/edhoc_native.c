@@ -8,10 +8,14 @@
 
 #include <psa/crypto.h>
 #include <mbedtls/psa_util.h>
+#include <zcbor_common.h>
+#include <zcbor_encode.h>
+#include <backend_cbor_bstr_type_encode.h>
 
 #define EDHOC_ALLOW_PRIVATE_ACCESS
 #include <edhoc.h>
 #include <edhoc_cipher_suite_0.h>
+#include <edhoc_cipher_suite_4.h>
 #include "../../vendor/libedhoc/tests/include/test_vector_x5chain_sign_keys_suite_0.h"
 
 /*
@@ -23,14 +27,22 @@
 #endif
 #define CONFIG_LIBEDHOC_LOG_LEVEL 0
 
-/* Compile libedhoc's suite-0 helper into this native extension. */
+/* Compile libedhoc's helper suites into this native extension. */
 #include "../../vendor/libedhoc/helpers/src/edhoc_cipher_suite_0.c"
+#include "../../vendor/libedhoc/helpers/src/edhoc_cipher_suite_4.c"
 
 #define EDHOC_RUBY_MAX_MESSAGE 2048
+#define EDHOC_RUBY_MAX_KID 32
+
+enum suite0_credential_format {
+	SUITE0_CREDENTIAL_X509_CHAIN,
+	SUITE0_CREDENTIAL_KID_CBOR,
+};
 
 static VALUE mEdhoc;
 static VALUE mNative;
 static VALUE cSuite0Session;
+static VALUE cSuite4Session;
 static VALUE eEdhocError;
 static VALUE eEdhocNativeError;
 static VALUE eEdhocBadStateError;
@@ -47,6 +59,8 @@ struct suite0_peer {
 	size_t public_key_len;
 	uint8_t *credential;
 	size_t credential_len;
+	uint8_t *kid;
+	size_t kid_len;
 };
 
 struct suite0_session {
@@ -57,6 +71,10 @@ struct suite0_session {
 	size_t private_key_len;
 	uint8_t *credential;
 	size_t credential_len;
+	uint8_t *kid;
+	size_t kid_len;
+	enum suite0_credential_format credential_format;
+	const struct edhoc_keys *keys;
 	struct suite0_peer *peers;
 	size_t peers_len;
 	size_t matched_peer_index;
@@ -89,6 +107,32 @@ static const struct edhoc_crypto suite0_crypto = {
 	.encrypt = edhoc_cipher_suite_0_encrypt,
 	.decrypt = edhoc_cipher_suite_0_decrypt,
 	.hash = edhoc_cipher_suite_0_hash,
+};
+
+static int suite4_signature(void *user_ctx, const void *kid,
+			    const uint8_t *input, size_t input_len,
+			    uint8_t *sign, size_t sign_size, size_t *sign_len)
+{
+	int ret = edhoc_cipher_suite_4_signature(user_ctx, kid, input, input_len,
+						 sign, sign_size, sign_len);
+	int destroy_ret = edhoc_cipher_suite_4_key_destroy(user_ctx, (void *)kid);
+
+	if (EDHOC_SUCCESS != ret)
+		return ret;
+
+	return destroy_ret;
+}
+
+static const struct edhoc_crypto suite4_crypto = {
+	.make_key_pair = edhoc_cipher_suite_4_make_key_pair,
+	.key_agreement = edhoc_cipher_suite_4_key_agreement,
+	.signature = suite4_signature,
+	.verify = edhoc_cipher_suite_4_verify,
+	.extract = edhoc_cipher_suite_4_extract,
+	.expand = edhoc_cipher_suite_4_expand,
+	.encrypt = edhoc_cipher_suite_4_encrypt,
+	.decrypt = edhoc_cipher_suite_4_decrypt,
+	.hash = edhoc_cipher_suite_4_hash,
 };
 
 static const char *edhoc_error_name(int code)
@@ -215,6 +259,16 @@ static char *copy_optional_string(VALUE value, size_t *length)
 	return copy;
 }
 
+static uint8_t *copy_optional_bytes(VALUE value, size_t *length)
+{
+	if (NIL_P(value)) {
+		*length = 0;
+		return NULL;
+	}
+
+	return copy_bytes(value, length);
+}
+
 static void suite0_session_set_untrusted_credential(struct suite0_session *session,
 						    const uint8_t *credential,
 						    size_t credential_len)
@@ -251,6 +305,9 @@ static void suite0_peer_dispose(struct suite0_peer *peer)
 	free(peer->credential);
 	peer->credential = NULL;
 	peer->credential_len = 0;
+	free(peer->kid);
+	peer->kid = NULL;
+	peer->kid_len = 0;
 }
 
 static void suite0_session_dispose_peers(struct suite0_session *session)
@@ -274,8 +331,47 @@ static void validate_peer_public_key_length(size_t length)
 		rb_raise(rb_eArgError, "suite 0 Ed25519 peer public key must be 32 bytes");
 }
 
+static int encode_kid_bstr(const uint8_t *kid, size_t kid_len,
+			   uint8_t *output, size_t output_size, size_t *output_len)
+{
+	const struct zcbor_string input = {
+		.value = kid,
+		.len = kid_len,
+	};
+
+	return cbor_encode_byte_string_type_bstr_type(
+		output, output_size, &input, output_len);
+}
+
+static void validate_kid_length(size_t length)
+{
+	if (length == 0 || length > EDHOC_RUBY_MAX_KID)
+		rb_raise(rb_eArgError, "credential kid must be 1..%d bytes",
+			 EDHOC_RUBY_MAX_KID);
+}
+
+static int encode_auth_cred_kid(struct edhoc_auth_creds *auth_cred,
+				const uint8_t *kid, size_t kid_len)
+{
+	size_t cbor_kid_len = 0;
+	int ret = encode_kid_bstr(
+		kid,
+		kid_len,
+		auth_cred->key_id.key_id_bstr,
+		sizeof(auth_cred->key_id.key_id_bstr),
+		&cbor_kid_len
+	);
+
+	if (ret != ZCBOR_SUCCESS)
+		return EDHOC_ERROR_CBOR_FAILURE;
+
+	auth_cred->key_id.encode_type = EDHOC_ENCODE_TYPE_BYTE_STRING;
+	auth_cred->key_id.key_id_bstr_length = cbor_kid_len;
+	return EDHOC_SUCCESS;
+}
+
 static void parse_single_peer(struct suite0_session *session, VALUE public_key,
-			      VALUE credential)
+			      VALUE credential, VALUE kid)
 {
 	session->peers = calloc(1, sizeof(struct suite0_peer));
 	if (session->peers == NULL)
@@ -284,19 +380,26 @@ static void parse_single_peer(struct suite0_session *session, VALUE public_key,
 	session->peers_len = 1;
 	session->peers[0].public_key = copy_bytes(public_key, &session->peers[0].public_key_len);
 	session->peers[0].credential = copy_bytes(credential, &session->peers[0].credential_len);
+	session->peers[0].kid = copy_optional_bytes(kid, &session->peers[0].kid_len);
 	validate_peer_public_key_length(session->peers[0].public_key_len);
+	if (session->peers[0].kid != NULL)
+		validate_kid_length(session->peers[0].kid_len);
 }
 
 static void parse_peer_tuple(struct suite0_peer *peer, VALUE tuple)
 {
 	Check_Type(tuple, T_ARRAY);
-	if (RARRAY_LEN(tuple) != 3)
-		rb_raise(rb_eArgError, "peer tuple must be [id, public_key, credential]");
+	if (RARRAY_LEN(tuple) != 3 && RARRAY_LEN(tuple) != 4)
+		rb_raise(rb_eArgError, "peer tuple must be [id, public_key, credential] or [id, public_key, credential, kid]");
 
 	peer->id = copy_optional_string(rb_ary_entry(tuple, 0), &peer->id_len);
 	peer->public_key = copy_bytes(rb_ary_entry(tuple, 1), &peer->public_key_len);
 	peer->credential = copy_bytes(rb_ary_entry(tuple, 2), &peer->credential_len);
+	if (RARRAY_LEN(tuple) == 4)
+		peer->kid = copy_optional_bytes(rb_ary_entry(tuple, 3), &peer->kid_len);
 	validate_peer_public_key_length(peer->public_key_len);
+	if (peer->kid != NULL)
+		validate_kid_length(peer->kid_len);
 }
 
 static void parse_peers(struct suite0_session *session, VALUE peers_value)
@@ -314,6 +417,31 @@ static void parse_peers(struct suite0_session *session, VALUE peers_value)
 		parse_peer_tuple(&session->peers[i], rb_ary_entry(peers_value, i));
 }
 
+static enum suite0_credential_format parse_credential_format(VALUE value)
+{
+	const char *format = StringValueCStr(value);
+
+	if (strcmp(format, "x509_chain") == 0)
+		return SUITE0_CREDENTIAL_X509_CHAIN;
+	if (strcmp(format, "kid_cbor") == 0)
+		return SUITE0_CREDENTIAL_KID_CBOR;
+
+	rb_raise(rb_eArgError, "credential_format must be x509_chain or kid_cbor");
+}
+
+static void validate_credential_format_settings(struct suite0_session *session)
+{
+	if (session->credential_format == SUITE0_CREDENTIAL_X509_CHAIN)
+		return;
+
+	validate_kid_length(session->kid_len);
+	for (size_t i = 0; i < session->peers_len; i++) {
+		if (session->peers[i].kid == NULL)
+			rb_raise(rb_eArgError, "peer kid is required for kid_cbor credentials");
+		validate_kid_length(session->peers[i].kid_len);
+	}
+}
+
 static int auth_cred_fetch(void *user_ctx, struct edhoc_auth_creds *auth_cred)
 {
 	struct suite0_session *session = user_ctx;
@@ -321,12 +449,22 @@ static int auth_cred_fetch(void *user_ctx, struct edhoc_auth_creds *auth_cred)
 	if (session == NULL || auth_cred == NULL)
 		return EDHOC_ERROR_INVALID_ARGUMENT;
 
-	auth_cred->label = EDHOC_COSE_HEADER_X509_CHAIN;
-	auth_cred->x509_chain.nr_of_certs = 1;
-	auth_cred->x509_chain.cert[0] = session->credential;
-	auth_cred->x509_chain.cert_len[0] = session->credential_len;
+	if (session->credential_format == SUITE0_CREDENTIAL_KID_CBOR) {
+		auth_cred->label = EDHOC_COSE_HEADER_KID;
+		auth_cred->key_id.cred = session->credential;
+		auth_cred->key_id.cred_len = session->credential_len;
+		auth_cred->key_id.cred_is_cbor = true;
+		int kid_ret = encode_auth_cred_kid(auth_cred, session->kid, session->kid_len);
+		if (kid_ret != EDHOC_SUCCESS)
+			return kid_ret;
+	} else {
+		auth_cred->label = EDHOC_COSE_HEADER_X509_CHAIN;
+		auth_cred->x509_chain.nr_of_certs = 1;
+		auth_cred->x509_chain.cert[0] = session->credential;
+		auth_cred->x509_chain.cert_len[0] = session->credential_len;
+	}
 
-	int res = edhoc_cipher_suite_0_key_import(
+	int res = session->keys->import_key(
 		NULL,
 		EDHOC_KT_SIGNATURE,
 		session->private_key,
@@ -337,14 +475,44 @@ static int auth_cred_fetch(void *user_ctx, struct edhoc_auth_creds *auth_cred)
 	return res == EDHOC_SUCCESS ? EDHOC_SUCCESS : EDHOC_ERROR_CREDENTIALS_FAILURE;
 }
 
-static int auth_cred_verify(void *user_ctx, struct edhoc_auth_creds *auth_cred,
-			    const uint8_t **pub_key, size_t *pub_key_len)
+static int auth_cred_verify_kid_cbor(struct suite0_session *session,
+				     struct edhoc_auth_creds *auth_cred,
+				     const uint8_t **pub_key, size_t *pub_key_len)
 {
-	struct suite0_session *session = user_ctx;
+	if (auth_cred->label != EDHOC_COSE_HEADER_KID)
+		return EDHOC_ERROR_CREDENTIALS_FAILURE;
+	if (auth_cred->key_id.encode_type != EDHOC_ENCODE_TYPE_BYTE_STRING)
+		return EDHOC_ERROR_CREDENTIALS_FAILURE;
 
-	if (session == NULL || auth_cred == NULL || pub_key == NULL || pub_key_len == NULL)
-		return EDHOC_ERROR_INVALID_ARGUMENT;
+	for (size_t i = 0; i < session->peers_len; i++) {
+		struct suite0_peer *peer = &session->peers[i];
 
+		if (peer->kid_len != auth_cred->key_id.key_id_bstr_length)
+			continue;
+		if (memcmp(peer->kid, auth_cred->key_id.key_id_bstr, peer->kid_len) != 0)
+			continue;
+
+		auth_cred->key_id.cred = peer->credential;
+		auth_cred->key_id.cred_len = peer->credential_len;
+		auth_cred->key_id.cred_is_cbor = true;
+		int kid_ret = encode_auth_cred_kid(auth_cred, peer->kid, peer->kid_len);
+		if (kid_ret != EDHOC_SUCCESS)
+			return kid_ret;
+		*pub_key = peer->public_key;
+		*pub_key_len = peer->public_key_len;
+		session->matched_peer_index = i;
+		session->matched_peer = true;
+		suite0_session_set_untrusted_credential(session, NULL, 0);
+		return EDHOC_SUCCESS;
+	}
+
+	return EDHOC_ERROR_CREDENTIALS_FAILURE;
+}
+
+static int auth_cred_verify_x509_chain(struct suite0_session *session,
+				       struct edhoc_auth_creds *auth_cred,
+				       const uint8_t **pub_key, size_t *pub_key_len)
+{
 	if (auth_cred->label != EDHOC_COSE_HEADER_X509_CHAIN)
 		return EDHOC_ERROR_CREDENTIALS_FAILURE;
 
@@ -378,6 +546,20 @@ static int auth_cred_verify(void *user_ctx, struct edhoc_auth_creds *auth_cred,
 	return EDHOC_ERROR_CREDENTIALS_FAILURE;
 }
 
+static int auth_cred_verify(void *user_ctx, struct edhoc_auth_creds *auth_cred,
+			    const uint8_t **pub_key, size_t *pub_key_len)
+{
+	struct suite0_session *session = user_ctx;
+
+	if (session == NULL || auth_cred == NULL || pub_key == NULL || pub_key_len == NULL)
+		return EDHOC_ERROR_INVALID_ARGUMENT;
+
+	if (session->credential_format == SUITE0_CREDENTIAL_KID_CBOR)
+		return auth_cred_verify_kid_cbor(session, auth_cred, pub_key, pub_key_len);
+
+	return auth_cred_verify_x509_chain(session, auth_cred, pub_key, pub_key_len);
+}
+
 static const struct edhoc_credentials suite0_credentials = {
 	.fetch = auth_cred_fetch,
 	.verify = auth_cred_verify,
@@ -399,6 +581,10 @@ static void suite0_session_dispose(struct suite0_session *session)
 	free(session->credential);
 	session->credential = NULL;
 	session->credential_len = 0;
+	free(session->kid);
+	session->kid = NULL;
+	session->kid_len = 0;
+	session->keys = NULL;
 	free(session->untrusted_credential);
 	session->untrusted_credential = NULL;
 	session->untrusted_credential_len = 0;
@@ -471,13 +657,16 @@ static struct edhoc_connection_id parse_connection_id(VALUE value)
 	return cid;
 }
 
-static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
+static VALUE suite_session_initialize(int argc, VALUE *argv, VALUE self, int suite_number)
 {
 	VALUE role_value;
 	VALUE private_key;
 	VALUE credential;
+	VALUE credential_format_value;
+	VALUE kid_value;
 	VALUE peer_public_key;
 	VALUE peer_credential;
+	VALUE peer_kid;
 	VALUE peers_value;
 	VALUE connection_id_value;
 	struct suite0_session *session;
@@ -487,20 +676,48 @@ static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
 		role_value = argv[0];
 		private_key = argv[1];
 		credential = argv[2];
+		credential_format_value = rb_str_new_cstr("x509_chain");
+		kid_value = Qnil;
 		peer_public_key = argv[3];
 		peer_credential = argv[4];
+		peer_kid = Qnil;
 		connection_id_value = argv[5];
 		peers_value = Qnil;
 	} else if (argc == 5) {
 		role_value = argv[0];
 		private_key = argv[1];
 		credential = argv[2];
+		credential_format_value = rb_str_new_cstr("x509_chain");
+		kid_value = Qnil;
 		peers_value = argv[3];
 		connection_id_value = argv[4];
 		peer_public_key = Qnil;
 		peer_credential = Qnil;
+		peer_kid = Qnil;
+	} else if (argc == 9) {
+		role_value = argv[0];
+		private_key = argv[1];
+		credential = argv[2];
+		credential_format_value = argv[3];
+		kid_value = argv[4];
+		peer_public_key = argv[5];
+		peer_credential = argv[6];
+		peer_kid = argv[7];
+		connection_id_value = argv[8];
+		peers_value = Qnil;
+	} else if (argc == 7) {
+		role_value = argv[0];
+		private_key = argv[1];
+		credential = argv[2];
+		credential_format_value = argv[3];
+		kid_value = argv[4];
+		peers_value = argv[5];
+		connection_id_value = argv[6];
+		peer_public_key = Qnil;
+		peer_credential = Qnil;
+		peer_kid = Qnil;
 	} else {
-		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 5 or 6)", argc);
+		rb_raise(rb_eArgError, "wrong number of arguments (given %d, expected 5, 6, 7, or 9)", argc);
 	}
 
 	const char *role = StringValueCStr(role_value);
@@ -514,21 +731,44 @@ static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
 
 	session->private_key = copy_bytes(private_key, &session->private_key_len);
 	session->credential = copy_bytes(credential, &session->credential_len);
+	session->credential_format = parse_credential_format(credential_format_value);
+	session->kid = copy_optional_bytes(kid_value, &session->kid_len);
 	if (NIL_P(peers_value))
-		parse_single_peer(session, peer_public_key, peer_credential);
+		parse_single_peer(session, peer_public_key, peer_credential, peer_kid);
 	else
 		parse_peers(session, peers_value);
+	validate_credential_format_settings(session);
 
 	if (session->private_key_len != 64)
-		rb_raise(rb_eArgError, "suite 0 Ed25519 private key must be 64 bytes");
+		rb_raise(rb_eArgError, "suite %d Ed25519 private key must be 64 bytes", suite_number);
 
 	int ret = psa_crypto_init();
 	if (ret != PSA_SUCCESS)
 		rb_raise(eEdhocError, "psa_crypto_init failed with code %d", ret);
 
 	const enum edhoc_method methods[] = { EDHOC_METHOD_0 };
+	const struct edhoc_cipher_suite *suite = NULL;
+	const struct edhoc_keys *keys = NULL;
+	const struct edhoc_crypto *crypto = NULL;
+
+	switch (suite_number) {
+	case 0:
+		suite = edhoc_cipher_suite_0_get_suite();
+		keys = edhoc_cipher_suite_0_get_keys();
+		crypto = &suite0_crypto;
+		break;
+	case 4:
+		suite = edhoc_cipher_suite_4_get_suite();
+		keys = edhoc_cipher_suite_4_get_keys();
+		crypto = &suite4_crypto;
+		break;
+	default:
+		rb_raise(rb_eArgError, "unsupported EDHOC cipher suite %d", suite_number);
+	}
+	session->keys = keys;
+
 	const struct edhoc_cipher_suite cipher_suites[] = {
-		*edhoc_cipher_suite_0_get_suite(),
+		*suite,
 	};
 	struct edhoc_connection_id connection_id = parse_connection_id(connection_id_value);
 
@@ -553,11 +793,11 @@ static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
 	if (ret != EDHOC_SUCCESS)
 		raise_edhoc_error("edhoc_set_user_context", ret);
 
-	ret = edhoc_bind_keys(&session->ctx, edhoc_cipher_suite_0_get_keys());
+	ret = edhoc_bind_keys(&session->ctx, keys);
 	if (ret != EDHOC_SUCCESS)
 		raise_edhoc_error("edhoc_bind_keys", ret);
 
-	ret = edhoc_bind_crypto(&session->ctx, &suite0_crypto);
+	ret = edhoc_bind_crypto(&session->ctx, crypto);
 	if (ret != EDHOC_SUCCESS)
 		raise_edhoc_error("edhoc_bind_crypto", ret);
 
@@ -566,6 +806,16 @@ static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
 		raise_edhoc_error("edhoc_bind_credentials", ret);
 
 	return self;
+}
+
+static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
+{
+	return suite_session_initialize(argc, argv, self, 0);
+}
+
+static VALUE suite4_session_initialize(int argc, VALUE *argv, VALUE self)
+{
+	return suite_session_initialize(argc, argv, self, 4);
 }
 
 static VALUE compose_to_string(struct suite0_session *session, const char *name,
@@ -685,17 +935,15 @@ static VALUE native_library_version(VALUE self)
 	return hash;
 }
 
-static VALUE native_suite0_profile(VALUE self)
+static VALUE suite_profile_hash(const struct edhoc_cipher_suite *suite, const char *aead)
 {
-	(void)self;
-	const struct edhoc_cipher_suite *suite = edhoc_cipher_suite_0_get_suite();
 	VALUE hash = rb_hash_new();
 	rb_hash_aset(hash, ID2SYM(rb_intern("method")), INT2NUM(0));
 	rb_hash_aset(hash, ID2SYM(rb_intern("cipher_suite")), INT2NUM(suite->value));
 	rb_hash_aset(hash, ID2SYM(rb_intern("ecdh")), rb_str_new_cstr("X25519"));
 	rb_hash_aset(hash, ID2SYM(rb_intern("signature")), rb_str_new_cstr("Ed25519/EdDSA"));
 	rb_hash_aset(hash, ID2SYM(rb_intern("hash")), rb_str_new_cstr("SHA-256"));
-	rb_hash_aset(hash, ID2SYM(rb_intern("aead")), rb_str_new_cstr("AES-CCM-16-64-128"));
+	rb_hash_aset(hash, ID2SYM(rb_intern("aead")), rb_str_new_cstr(aead));
 	rb_hash_aset(hash, ID2SYM(rb_intern("aead_key_length")), SIZET2NUM(suite->aead_key_length));
 	rb_hash_aset(hash, ID2SYM(rb_intern("aead_tag_length")), SIZET2NUM(suite->aead_tag_length));
 	rb_hash_aset(hash, ID2SYM(rb_intern("aead_iv_length")), SIZET2NUM(suite->aead_iv_length));
@@ -703,6 +951,18 @@ static VALUE native_suite0_profile(VALUE self)
 	rb_hash_aset(hash, ID2SYM(rb_intern("ecc_key_length")), SIZET2NUM(suite->ecc_key_length));
 	rb_hash_aset(hash, ID2SYM(rb_intern("signature_length")), SIZET2NUM(suite->ecc_sign_length));
 	return hash;
+}
+
+static VALUE native_suite0_profile(VALUE self)
+{
+	(void)self;
+	return suite_profile_hash(edhoc_cipher_suite_0_get_suite(), "AES-CCM-16-64-128");
+}
+
+static VALUE native_suite4_profile(VALUE self)
+{
+	(void)self;
+	return suite_profile_hash(edhoc_cipher_suite_4_get_suite(), "ChaCha20-Poly1305");
 }
 
 static VALUE native_suite0_test_vector(VALUE self)
@@ -739,6 +999,7 @@ void Init_edhoc_native(void)
 
 	rb_define_singleton_method(mNative, "library_version", native_library_version, 0);
 	rb_define_singleton_method(mNative, "suite0_profile", native_suite0_profile, 0);
+	rb_define_singleton_method(mNative, "suite4_profile", native_suite4_profile, 0);
 	rb_define_singleton_method(mNative, "suite0_test_vector", native_suite0_test_vector, 0);
 
 	cSuite0Session = rb_define_class_under(mNative, "Suite0Session", rb_cObject);
@@ -754,4 +1015,18 @@ void Init_edhoc_native(void)
 	rb_define_method(cSuite0Session, "matched_peer_id", suite0_matched_peer_id, 0);
 	rb_define_method(cSuite0Session, "untrusted_credential", suite0_untrusted_credential, 0);
 	rb_define_method(cSuite0Session, "close", suite0_close, 0);
+
+	cSuite4Session = rb_define_class_under(mNative, "Suite4Session", rb_cObject);
+	rb_define_alloc_func(cSuite4Session, suite0_session_alloc);
+	rb_define_method(cSuite4Session, "initialize", suite4_session_initialize, -1);
+	rb_define_method(cSuite4Session, "compose_message1", suite0_compose_message1, 0);
+	rb_define_method(cSuite4Session, "process_message1", suite0_process_message1, 1);
+	rb_define_method(cSuite4Session, "compose_message2", suite0_compose_message2, 0);
+	rb_define_method(cSuite4Session, "process_message2", suite0_process_message2, 1);
+	rb_define_method(cSuite4Session, "compose_message3", suite0_compose_message3, 0);
+	rb_define_method(cSuite4Session, "process_message3", suite0_process_message3, 1);
+	rb_define_method(cSuite4Session, "export_prk", suite0_export_prk, 2);
+	rb_define_method(cSuite4Session, "matched_peer_id", suite0_matched_peer_id, 0);
+	rb_define_method(cSuite4Session, "untrusted_credential", suite0_untrusted_credential, 0);
+	rb_define_method(cSuite4Session, "close", suite0_close, 0);
 }

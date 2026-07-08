@@ -5,19 +5,16 @@ Experimental Ruby bindings for [libedhoc](https://github.com/kamil-kielbasa/libe
 This gem exists to support Secure RSMP prototype work and RSMP conformance tooling. It is not yet a
 general-purpose EDHOC library.
 
-## Supported Profile
+## Supported Profiles
 
-The current public API exposes one profile:
+The current public API exposes two EDHOC method 0 profiles:
 
-- EDHOC method 0
-- EDHOC cipher suite 0
-- X25519 ephemeral key agreement
-- Ed25519 / EdDSA authentication
-- X.509-chain credential transport
+| Ruby class | EDHOC cipher suite | Key agreement | Authentication | EDHOC AEAD |
+| --- | --- | --- | --- | --- |
+| `Edhoc::Suite0Session` | 0 | X25519 | Ed25519 / EdDSA | AES-CCM-16-64-128 |
+| `Edhoc::Suite4Session` | 4 | X25519 | Ed25519 / EdDSA | ChaCha20-Poly1305 |
 
-The Secure RSMP proposal direction is X25519/Ed25519 with ChaCha20-Poly1305. `libedhoc` does not
-currently expose that exact EDHOC cipher suite. Suite 0 is the closest supported profile because it
-uses method 0, X25519, EdDSA, and SHA-256, but AES-CCM-16-64-128 for EDHOC AEAD.
+Both profiles currently use X.509-chain credential transport through libedhoc.
 
 ## Installation
 
@@ -55,7 +52,7 @@ bundle exec rubocop
 ```ruby
 require 'edhoc'
 
-initiator = Edhoc::Suite0Session.new(
+initiator = Edhoc::Suite4Session.new(
   role: :initiator,
   private_key: initiator_private_key,
   credential: initiator_certificate_der,
@@ -63,7 +60,7 @@ initiator = Edhoc::Suite0Session.new(
   peer_credential: responder_certificate_der
 )
 
-responder = Edhoc::Suite0Session.new(
+responder = Edhoc::Suite4Session.new(
   role: :responder,
   private_key: responder_private_key,
   credential: responder_certificate_der,
@@ -133,8 +130,8 @@ as `Edhoc::BadStateError` and `Edhoc::CredentialsError`.
 ## Development Status
 
 This gem deliberately keeps the public API small while the native boundary settles. It is suitable for
-local Secure RSMP prototype testing, but it should not be treated as a final normative EDHOC profile or
-production-ready credential system.
+local Secure RSMP prototype testing, but it should not be treated as a production-ready credential
+system.
 
 The Ruby wrapper is MIT licensed. The vendored `libedhoc` project is also MIT licensed; see
 `vendor/libedhoc/LICENSE`.
