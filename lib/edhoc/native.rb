@@ -1,1 +1,1 @@
-require "edhoc_native"
+require 'edhoc_native'

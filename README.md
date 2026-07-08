@@ -2,7 +2,12 @@
 
 Experimental Ruby bindings for [libedhoc](https://github.com/kamil-kielbasa/libedhoc).
 
-This first version targets the Secure RSMP draft profile work:
+This gem exists to support Secure RSMP prototype work and RSMP conformance tooling. It is not yet a
+general-purpose EDHOC library.
+
+## Supported Profile
+
+The current public API exposes one profile:
 
 - EDHOC method 0
 - EDHOC cipher suite 0
@@ -10,11 +15,46 @@ This first version targets the Secure RSMP draft profile work:
 - Ed25519 / EdDSA authentication
 - X.509-chain credential transport
 
-The current Secure RSMP proposal discusses X25519/Ed25519 with ChaCha20-Poly1305. `libedhoc` does not currently expose that exact EDHOC cipher suite; suite 0 is the closest supported profile because it uses method 0, X25519, EdDSA, and SHA-256, but AES-CCM-16-64-128 for EDHOC AEAD. This gem is therefore a working integration spike and conformance-tooling base, not yet the final RSMP mandatory profile.
+The Secure RSMP proposal direction is X25519/Ed25519 with ChaCha20-Poly1305. `libedhoc` does not
+currently expose that exact EDHOC cipher suite. Suite 0 is the closest supported profile because it
+uses method 0, X25519, EdDSA, and SHA-256, but AES-CCM-16-64-128 for EDHOC AEAD.
 
-The public API is intentionally narrow while the native boundary settles.
+## Installation
+
+This gem is currently developed locally inside the RSMP workspace. Use it from another Gemfile with a
+path dependency:
 
 ```ruby
+gem 'edhoc', path: '../edhoc_gem'
+```
+
+The native extension requires:
+
+- Ruby development headers
+- CMake
+- a C compiler
+
+`libedhoc` is vendored under `vendor/libedhoc`. Its required submodules must be present:
+
+```sh
+cd vendor/libedhoc
+git submodule update --init --depth 1 externals/mbedtls externals/zcbor externals/compact25519 externals/Unity
+```
+
+Build and test:
+
+```sh
+bundle install
+bundle exec rake compile
+bundle exec sus
+bundle exec rubocop
+```
+
+## Basic Handshake
+
+```ruby
+require 'edhoc'
+
 initiator = Edhoc::Suite0Session.new(
   role: :initiator,
   private_key: initiator_private_key,
@@ -31,37 +71,70 @@ responder = Edhoc::Suite0Session.new(
   peer_credential: initiator_certificate_der
 )
 
-m1 = initiator.compose_message1
-responder.process_message1(m1)
-m2 = responder.compose_message2
-initiator.process_message2(m2)
-m3 = initiator.compose_message3
-responder.process_message3(m3)
+message1 = initiator.compose_message1
+responder.process_message1(message1)
+
+message2 = responder.compose_message2
+initiator.process_message2(message2)
+
+message3 = initiator.compose_message3
+responder.process_message3(message3)
+
+secret = initiator.export_prk(0, 32)
 ```
 
-## Build
+Always close sessions when done:
 
-The native extension requires:
-
-- Ruby development headers
-- CMake
-- a C compiler
-
-`libedhoc` is vendored under `vendor/libedhoc`. Its required submodules must be present:
-
-```sh
-cd vendor/libedhoc
-git submodule update --init --depth 1 externals/mbedtls externals/zcbor externals/compact25519 externals/Unity
+```ruby
+initiator.close
+responder.close
 ```
 
-Then:
+## Multi-Peer Responder
 
-```sh
-bundle install
-bundle exec rake compile
-bundle exec rake test
+A responder can be configured with multiple trusted peers. The native verifier matches the presented
+credential against the configured set and exposes the matched peer id after the handshake.
+
+```ruby
+responder = Edhoc::Suite0Session.new(
+  role: :responder,
+  private_key: responder_private_key,
+  credential: responder_certificate_der,
+  peers: [
+    {
+      id: 'RN+SI0001',
+      public_key: site1_public_key,
+      credential: site1_certificate_der
+    },
+    {
+      id: 'RN+SI0002',
+      public_key: site2_public_key,
+      credential: site2_certificate_der
+    }
+  ]
+)
+
+# After process_message3 succeeds:
+responder.matched_peer_id
 ```
 
-## Status
+If a peer presents an X.509 credential that is not trusted, `process_message3` raises
+`Edhoc::CredentialsError`. When possible, the error message includes the credential common name:
 
-This is not yet a full general-purpose EDHOC API. It is a first binding for the proposed Secure RSMP profile and conformance tooling.
+```text
+peer credential RN+SI0002 not trusted
+```
+
+## Native Errors
+
+libedhoc failures are mapped to Ruby exceptions under `Edhoc::Error`, including typed subclasses such
+as `Edhoc::BadStateError` and `Edhoc::CredentialsError`.
+
+## Development Status
+
+This gem deliberately keeps the public API small while the native boundary settles. It is suitable for
+local Secure RSMP prototype testing, but it should not be treated as a final normative EDHOC profile or
+production-ready credential system.
+
+The Ruby wrapper is MIT licensed. The vendored `libedhoc` project is also MIT licensed; see
+`vendor/libedhoc/LICENSE`.

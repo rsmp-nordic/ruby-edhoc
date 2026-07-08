@@ -1,0 +1,59 @@
+AllCops:
+  SuggestExtensions: false
+  NewCops: enable
+  TargetRubyVersion: 3.4
+  Exclude:
+    - 'vendor/**/*'
+    - 'ext/**/*'
+    - 'build/**/*'
+    - 'tmp/**/*'
+    - 'pkg/**/*'
+    - '.bundle/**/*'
+
+Layout/LineLength:
+  Max: 120
+  Exclude:
+    - 'test/**/*'
+
+Metrics/MethodLength:
+  Max: 25
+
+Metrics/ClassLength:
+  Max: 200
+
+Metrics/ModuleLength:
+  Max: 200
+
+Metrics/AbcSize:
+  Max: 20
+  Exclude:
+    - 'test/**/*'
+
+Metrics/CyclomaticComplexity:
+  Max: 10
+
+Metrics/PerceivedComplexity:
+  Max: 10
+
+Metrics/ParameterLists:
+  Max: 5
+
+Metrics/BlockLength:
+  Exclude:
+    - 'test/**/*'
+    - '*.gemspec'
+
+Style/NumericPredicate:
+  Exclude:
+    - 'test/**/*.rb'
+
+Style/FrozenStringLiteralComment:
+  Enabled: false
+
+Style/MixinUsage:
+  Exclude:
+    - 'test/**/*'
+
+Lint/ConstantDefinitionInBlock:
+  Exclude:
+    - 'test/**/*'

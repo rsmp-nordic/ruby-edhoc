@@ -1,13 +1,13 @@
-require_relative "test_helper"
-require "openssl"
+require_relative 'test_helper'
+require 'openssl'
 
 describe Edhoc do
   def generated_identity(id)
-    key = OpenSSL::PKey.generate_key("ED25519")
+    key = OpenSSL::PKey.generate_key('ED25519')
     certificate = OpenSSL::X509::Certificate.new
     certificate.version = 2
     certificate.serial = 1
-    certificate.subject = OpenSSL::X509::Name.new([["CN", id, OpenSSL::ASN1::UTF8STRING]])
+    certificate.subject = OpenSSL::X509::Name.new([['CN', id, OpenSSL::ASN1::UTF8STRING]])
     certificate.issuer = certificate.subject
     certificate.public_key = key
     certificate.not_before = Time.now - 60
@@ -55,17 +55,17 @@ describe Edhoc do
     expect(responder.process_message3(message3)).to be == true
   end
 
-  it "exposes native profile metadata for the secure RSMP candidate" do
+  it 'exposes native profile metadata for the secure RSMP candidate' do
     profile = Edhoc::Native.suite0_profile
 
     expect(profile.fetch(:method)).to be == 0
     expect(profile.fetch(:cipher_suite)).to be == 0
-    expect(profile.fetch(:ecdh)).to be == "X25519"
-    expect(profile.fetch(:signature)).to be == "Ed25519/EdDSA"
-    expect(profile.fetch(:hash)).to be == "SHA-256"
+    expect(profile.fetch(:ecdh)).to be == 'X25519'
+    expect(profile.fetch(:signature)).to be == 'Ed25519/EdDSA'
+    expect(profile.fetch(:hash)).to be == 'SHA-256'
   end
 
-  it "runs a suite 0 initiator/responder handshake" do
+  it 'runs a suite 0 initiator/responder handshake' do
     vector = Edhoc::Native.suite0_test_vector
     initiator, responder = suite0_sessions(vector)
     run_suite0_handshake(initiator, responder)
@@ -80,7 +80,7 @@ describe Edhoc do
     responder&.close
   end
 
-  it "matches a known peer from a responder peer set" do
+  it 'matches a known peer from a responder peer set' do
     vector = Edhoc::Native.suite0_test_vector
     initiator = Edhoc::Suite0Session.new(
       role: :initiator,
@@ -95,12 +95,12 @@ describe Edhoc do
       credential: vector.fetch(:responder_credential),
       peers: [
         {
-          id: "other-site",
-          public_key: "x" * 32,
-          credential: "not the initiator credential"
+          id: 'other-site',
+          public_key: 'x' * 32,
+          credential: 'not the initiator credential'
         },
         {
-          id: "site-a",
+          id: 'site-a',
           public_key: vector.fetch(:initiator_public_key),
           credential: vector.fetch(:initiator_credential)
         }
@@ -109,13 +109,13 @@ describe Edhoc do
 
     run_suite0_handshake(initiator, responder)
 
-    expect(responder.matched_peer_id).to be == "site-a"
+    expect(responder.matched_peer_id).to be == 'site-a'
   ensure
     initiator&.close
     responder&.close
   end
 
-  it "rejects unknown peers in a responder peer set" do
+  it 'rejects unknown peers in a responder peer set' do
     vector = Edhoc::Native.suite0_test_vector
     initiator = Edhoc::Suite0Session.new(
       role: :initiator,
@@ -130,9 +130,9 @@ describe Edhoc do
       credential: vector.fetch(:responder_credential),
       peers: [
         {
-          id: "other-site",
-          public_key: "x" * 32,
-          credential: "not the initiator credential"
+          id: 'other-site',
+          public_key: 'x' * 32,
+          credential: 'not the initiator credential'
         }
       ]
     )
@@ -148,9 +148,9 @@ describe Edhoc do
     responder&.close
   end
 
-  it "names an untrusted x509 credential by common name" do
+  it 'names an untrusted x509 credential by common name' do
     vector = Edhoc::Native.suite0_test_vector
-    site = generated_identity("RN+SI0002")
+    site = generated_identity('RN+SI0002')
     initiator = Edhoc::Suite0Session.new(
       role: :initiator,
       private_key: site.fetch(:private_key),
@@ -164,7 +164,7 @@ describe Edhoc do
       credential: vector.fetch(:responder_credential),
       peers: [
         {
-          id: "RN+SI0001",
+          id: 'RN+SI0001',
           public_key: vector.fetch(:initiator_public_key),
           credential: vector.fetch(:initiator_credential)
         }
@@ -176,13 +176,13 @@ describe Edhoc do
 
     expect do
       responder.process_message3(initiator.compose_message3)
-    end.to raise_exception(Edhoc::CredentialsError, message: be == "peer credential RN+SI0002 not trusted")
+    end.to raise_exception(Edhoc::CredentialsError, message: be == 'peer credential RN+SI0002 not trusted')
   ensure
     initiator&.close
     responder&.close
   end
 
-  it "releases native key handles across repeated handshakes" do
+  it 'releases native key handles across repeated handshakes' do
     vector = Edhoc::Native.suite0_test_vector
 
     25.times do
@@ -194,7 +194,7 @@ describe Edhoc do
     end
   end
 
-  it "raises typed Ruby exceptions for native libedhoc failures" do
+  it 'raises typed Ruby exceptions for native libedhoc failures' do
     vector = Edhoc::Native.suite0_test_vector
     initiator, = suite0_sessions(vector)
 
@@ -209,7 +209,7 @@ describe Edhoc do
     end
 
     expect(error).to be_a(Edhoc::BadStateError)
-    expect(error.message).to be(:include?, "bad_state (-104)")
+    expect(error.message).to be(:include?, 'bad_state (-104)')
   ensure
     initiator&.close
   end
