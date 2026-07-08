@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.email = ['zf0f@kk.dk']
 
   spec.summary = 'Experimental Ruby bindings for EDHOC using libedhoc.'
-  spec.description = 'A narrow Ruby wrapper around libedhoc for EDHOC method 0 / cipher suite 0, ' \
+  spec.description = 'A narrow Ruby wrapper around libedhoc for EDHOC method 0 / cipher suites 0 and 4, ' \
                      'built for Secure RSMP prototype and conformance tooling.'
   spec.homepage = 'https://github.com/rsmp-nordic/ruby-edhoc'
   spec.licenses = ['MIT']

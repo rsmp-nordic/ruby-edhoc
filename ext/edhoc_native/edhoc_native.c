@@ -12,6 +12,7 @@
 #define EDHOC_ALLOW_PRIVATE_ACCESS
 #include <edhoc.h>
 #include <edhoc_cipher_suite_0.h>
+#include <edhoc_cipher_suite_4.h>
 #include "../../vendor/libedhoc/tests/include/test_vector_x5chain_sign_keys_suite_0.h"
 
 /*
@@ -23,14 +24,16 @@
 #endif
 #define CONFIG_LIBEDHOC_LOG_LEVEL 0
 
-/* Compile libedhoc's suite-0 helper into this native extension. */
+/* Compile libedhoc's helper suites into this native extension. */
 #include "../../vendor/libedhoc/helpers/src/edhoc_cipher_suite_0.c"
+#include "../../vendor/libedhoc/helpers/src/edhoc_cipher_suite_4.c"
 
 #define EDHOC_RUBY_MAX_MESSAGE 2048
 
 static VALUE mEdhoc;
 static VALUE mNative;
 static VALUE cSuite0Session;
+static VALUE cSuite4Session;
 static VALUE eEdhocError;
 static VALUE eEdhocNativeError;
 static VALUE eEdhocBadStateError;
@@ -89,6 +92,32 @@ static const struct edhoc_crypto suite0_crypto = {
 	.encrypt = edhoc_cipher_suite_0_encrypt,
 	.decrypt = edhoc_cipher_suite_0_decrypt,
 	.hash = edhoc_cipher_suite_0_hash,
+};
+
+static int suite4_signature(void *user_ctx, const void *kid,
+			    const uint8_t *input, size_t input_len,
+			    uint8_t *sign, size_t sign_size, size_t *sign_len)
+{
+	int ret = edhoc_cipher_suite_4_signature(user_ctx, kid, input, input_len,
+						 sign, sign_size, sign_len);
+	int destroy_ret = edhoc_cipher_suite_4_key_destroy(user_ctx, (void *)kid);
+
+	if (EDHOC_SUCCESS != ret)
+		return ret;
+
+	return destroy_ret;
+}
+
+static const struct edhoc_crypto suite4_crypto = {
+	.make_key_pair = edhoc_cipher_suite_4_make_key_pair,
+	.key_agreement = edhoc_cipher_suite_4_key_agreement,
+	.signature = suite4_signature,
+	.verify = edhoc_cipher_suite_4_verify,
+	.extract = edhoc_cipher_suite_4_extract,
+	.expand = edhoc_cipher_suite_4_expand,
+	.encrypt = edhoc_cipher_suite_4_encrypt,
+	.decrypt = edhoc_cipher_suite_4_decrypt,
+	.hash = edhoc_cipher_suite_4_hash,
 };
 
 static const char *edhoc_error_name(int code)
@@ -471,7 +500,7 @@ static struct edhoc_connection_id parse_connection_id(VALUE value)
 	return cid;
 }
 
-static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
+static VALUE suite_session_initialize(int argc, VALUE *argv, VALUE self, int suite_number)
 {
 	VALUE role_value;
 	VALUE private_key;
@@ -520,15 +549,34 @@ static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
 		parse_peers(session, peers_value);
 
 	if (session->private_key_len != 64)
-		rb_raise(rb_eArgError, "suite 0 Ed25519 private key must be 64 bytes");
+		rb_raise(rb_eArgError, "suite %d Ed25519 private key must be 64 bytes", suite_number);
 
 	int ret = psa_crypto_init();
 	if (ret != PSA_SUCCESS)
 		rb_raise(eEdhocError, "psa_crypto_init failed with code %d", ret);
 
 	const enum edhoc_method methods[] = { EDHOC_METHOD_0 };
+	const struct edhoc_cipher_suite *suite = NULL;
+	const struct edhoc_keys *keys = NULL;
+	const struct edhoc_crypto *crypto = NULL;
+
+	switch (suite_number) {
+	case 0:
+		suite = edhoc_cipher_suite_0_get_suite();
+		keys = edhoc_cipher_suite_0_get_keys();
+		crypto = &suite0_crypto;
+		break;
+	case 4:
+		suite = edhoc_cipher_suite_4_get_suite();
+		keys = edhoc_cipher_suite_4_get_keys();
+		crypto = &suite4_crypto;
+		break;
+	default:
+		rb_raise(rb_eArgError, "unsupported EDHOC cipher suite %d", suite_number);
+	}
+
 	const struct edhoc_cipher_suite cipher_suites[] = {
-		*edhoc_cipher_suite_0_get_suite(),
+		*suite,
 	};
 	struct edhoc_connection_id connection_id = parse_connection_id(connection_id_value);
 
@@ -553,11 +601,11 @@ static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
 	if (ret != EDHOC_SUCCESS)
 		raise_edhoc_error("edhoc_set_user_context", ret);
 
-	ret = edhoc_bind_keys(&session->ctx, edhoc_cipher_suite_0_get_keys());
+	ret = edhoc_bind_keys(&session->ctx, keys);
 	if (ret != EDHOC_SUCCESS)
 		raise_edhoc_error("edhoc_bind_keys", ret);
 
-	ret = edhoc_bind_crypto(&session->ctx, &suite0_crypto);
+	ret = edhoc_bind_crypto(&session->ctx, crypto);
 	if (ret != EDHOC_SUCCESS)
 		raise_edhoc_error("edhoc_bind_crypto", ret);
 
@@ -566,6 +614,16 @@ static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
 		raise_edhoc_error("edhoc_bind_credentials", ret);
 
 	return self;
+}
+
+static VALUE suite0_session_initialize(int argc, VALUE *argv, VALUE self)
+{
+	return suite_session_initialize(argc, argv, self, 0);
+}
+
+static VALUE suite4_session_initialize(int argc, VALUE *argv, VALUE self)
+{
+	return suite_session_initialize(argc, argv, self, 4);
 }
 
 static VALUE compose_to_string(struct suite0_session *session, const char *name,
@@ -685,17 +743,15 @@ static VALUE native_library_version(VALUE self)
 	return hash;
 }
 
-static VALUE native_suite0_profile(VALUE self)
+static VALUE suite_profile_hash(const struct edhoc_cipher_suite *suite, const char *aead)
 {
-	(void)self;
-	const struct edhoc_cipher_suite *suite = edhoc_cipher_suite_0_get_suite();
 	VALUE hash = rb_hash_new();
 	rb_hash_aset(hash, ID2SYM(rb_intern("method")), INT2NUM(0));
 	rb_hash_aset(hash, ID2SYM(rb_intern("cipher_suite")), INT2NUM(suite->value));
 	rb_hash_aset(hash, ID2SYM(rb_intern("ecdh")), rb_str_new_cstr("X25519"));
 	rb_hash_aset(hash, ID2SYM(rb_intern("signature")), rb_str_new_cstr("Ed25519/EdDSA"));
 	rb_hash_aset(hash, ID2SYM(rb_intern("hash")), rb_str_new_cstr("SHA-256"));
-	rb_hash_aset(hash, ID2SYM(rb_intern("aead")), rb_str_new_cstr("AES-CCM-16-64-128"));
+	rb_hash_aset(hash, ID2SYM(rb_intern("aead")), rb_str_new_cstr(aead));
 	rb_hash_aset(hash, ID2SYM(rb_intern("aead_key_length")), SIZET2NUM(suite->aead_key_length));
 	rb_hash_aset(hash, ID2SYM(rb_intern("aead_tag_length")), SIZET2NUM(suite->aead_tag_length));
 	rb_hash_aset(hash, ID2SYM(rb_intern("aead_iv_length")), SIZET2NUM(suite->aead_iv_length));
@@ -703,6 +759,18 @@ static VALUE native_suite0_profile(VALUE self)
 	rb_hash_aset(hash, ID2SYM(rb_intern("ecc_key_length")), SIZET2NUM(suite->ecc_key_length));
 	rb_hash_aset(hash, ID2SYM(rb_intern("signature_length")), SIZET2NUM(suite->ecc_sign_length));
 	return hash;
+}
+
+static VALUE native_suite0_profile(VALUE self)
+{
+	(void)self;
+	return suite_profile_hash(edhoc_cipher_suite_0_get_suite(), "AES-CCM-16-64-128");
+}
+
+static VALUE native_suite4_profile(VALUE self)
+{
+	(void)self;
+	return suite_profile_hash(edhoc_cipher_suite_4_get_suite(), "ChaCha20-Poly1305");
 }
 
 static VALUE native_suite0_test_vector(VALUE self)
@@ -739,6 +807,7 @@ void Init_edhoc_native(void)
 
 	rb_define_singleton_method(mNative, "library_version", native_library_version, 0);
 	rb_define_singleton_method(mNative, "suite0_profile", native_suite0_profile, 0);
+	rb_define_singleton_method(mNative, "suite4_profile", native_suite4_profile, 0);
 	rb_define_singleton_method(mNative, "suite0_test_vector", native_suite0_test_vector, 0);
 
 	cSuite0Session = rb_define_class_under(mNative, "Suite0Session", rb_cObject);
@@ -754,4 +823,18 @@ void Init_edhoc_native(void)
 	rb_define_method(cSuite0Session, "matched_peer_id", suite0_matched_peer_id, 0);
 	rb_define_method(cSuite0Session, "untrusted_credential", suite0_untrusted_credential, 0);
 	rb_define_method(cSuite0Session, "close", suite0_close, 0);
+
+	cSuite4Session = rb_define_class_under(mNative, "Suite4Session", rb_cObject);
+	rb_define_alloc_func(cSuite4Session, suite0_session_alloc);
+	rb_define_method(cSuite4Session, "initialize", suite4_session_initialize, -1);
+	rb_define_method(cSuite4Session, "compose_message1", suite0_compose_message1, 0);
+	rb_define_method(cSuite4Session, "process_message1", suite0_process_message1, 1);
+	rb_define_method(cSuite4Session, "compose_message2", suite0_compose_message2, 0);
+	rb_define_method(cSuite4Session, "process_message2", suite0_process_message2, 1);
+	rb_define_method(cSuite4Session, "compose_message3", suite0_compose_message3, 0);
+	rb_define_method(cSuite4Session, "process_message3", suite0_process_message3, 1);
+	rb_define_method(cSuite4Session, "export_prk", suite0_export_prk, 2);
+	rb_define_method(cSuite4Session, "matched_peer_id", suite0_matched_peer_id, 0);
+	rb_define_method(cSuite4Session, "untrusted_credential", suite0_untrusted_credential, 0);
+	rb_define_method(cSuite4Session, "close", suite0_close, 0);
 }

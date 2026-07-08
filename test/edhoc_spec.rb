@@ -41,6 +41,26 @@ describe Edhoc do
     [initiator, responder]
   end
 
+  def suite4_sessions(vector)
+    initiator = Edhoc::Suite4Session.new(
+      role: :initiator,
+      private_key: vector.fetch(:initiator_private_key),
+      credential: vector.fetch(:initiator_credential),
+      peer_public_key: vector.fetch(:responder_public_key),
+      peer_credential: vector.fetch(:responder_credential)
+    )
+
+    responder = Edhoc::Suite4Session.new(
+      role: :responder,
+      private_key: vector.fetch(:responder_private_key),
+      credential: vector.fetch(:responder_credential),
+      peer_public_key: vector.fetch(:initiator_public_key),
+      peer_credential: vector.fetch(:initiator_credential)
+    )
+
+    [initiator, responder]
+  end
+
   def run_suite0_handshake(initiator, responder)
     message1 = initiator.compose_message1
     expect(message1.bytesize).to be > 0
@@ -65,6 +85,20 @@ describe Edhoc do
     expect(profile.fetch(:hash)).to be == 'SHA-256'
   end
 
+  it 'exposes native profile metadata for EDHOC suite 4' do
+    profile = Edhoc::Native.suite4_profile
+
+    expect(profile.fetch(:method)).to be == 0
+    expect(profile.fetch(:cipher_suite)).to be == 4
+    expect(profile.fetch(:ecdh)).to be == 'X25519'
+    expect(profile.fetch(:signature)).to be == 'Ed25519/EdDSA'
+    expect(profile.fetch(:hash)).to be == 'SHA-256'
+    expect(profile.fetch(:aead)).to be == 'ChaCha20-Poly1305'
+    expect(profile.fetch(:aead_key_length)).to be == 32
+    expect(profile.fetch(:aead_tag_length)).to be == 16
+    expect(profile.fetch(:aead_iv_length)).to be == 12
+  end
+
   it 'runs a suite 0 initiator/responder handshake' do
     vector = Edhoc::Native.suite0_test_vector
     initiator, responder = suite0_sessions(vector)
@@ -74,6 +108,21 @@ describe Edhoc do
     responder_secret = responder.export_prk(0, 16)
 
     expect(initiator_secret.bytesize).to be == 16
+    expect(initiator_secret).to be == responder_secret
+  ensure
+    initiator&.close
+    responder&.close
+  end
+
+  it 'runs a suite 4 initiator/responder handshake' do
+    vector = Edhoc::Native.suite0_test_vector
+    initiator, responder = suite4_sessions(vector)
+    run_suite0_handshake(initiator, responder)
+
+    initiator_secret = initiator.export_prk(0, 32)
+    responder_secret = responder.export_prk(0, 32)
+
+    expect(initiator_secret.bytesize).to be == 32
     expect(initiator_secret).to be == responder_secret
   ensure
     initiator&.close
