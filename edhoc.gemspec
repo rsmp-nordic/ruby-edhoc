@@ -11,13 +11,13 @@ Gem::Specification.new do |spec|
   spec.summary = 'Experimental Ruby bindings for EDHOC using libedhoc.'
   spec.description = 'A narrow Ruby wrapper around libedhoc for EDHOC method 0 / cipher suite 0, ' \
                      'built for Secure RSMP prototype and conformance tooling.'
-  spec.homepage = 'https://github.com/rsmp-nordic/rsmp'
+  spec.homepage = 'https://github.com/rsmp-nordic/ruby-edhoc'
   spec.licenses = ['MIT']
   spec.required_ruby_version = '>= 3.4'
 
   spec.metadata['homepage_uri'] = spec.homepage
-  spec.metadata['source_code_uri'] = 'https://github.com/rsmp-nordic/rsmp/tree/master/edhoc_gem'
-  spec.metadata['bug_tracker_uri'] = 'https://github.com/rsmp-nordic/rsmp/issues'
+  spec.metadata['source_code_uri'] = 'https://github.com/rsmp-nordic/ruby-edhoc/tree/main'
+  spec.metadata['bug_tracker_uri'] = 'https://github.com/rsmp-nordic/ruby-edhoc/issues'
   spec.metadata['rubygems_mfa_required'] = 'true'
 
   spec.files = Dir[

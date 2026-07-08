@@ -1,4 +1,5 @@
 require "mkmf"
+require "fileutils"
 require "shellwords"
 
 ROOT = File.expand_path("../..", __dir__)
@@ -10,12 +11,20 @@ def run!(cmd)
   abort "command failed: #{cmd}" unless system(cmd)
 end
 
+cache = File.join(BUILD, "CMakeCache.txt")
+if File.file?(cache)
+  source = File.readlines(cache).find { |line| line.start_with?("CMAKE_HOME_DIRECTORY:INTERNAL=") }
+  source = source&.split("=", 2)&.last&.strip
+  FileUtils.rm_rf(BUILD) if source && File.expand_path(source) != LIBEDHOC
+end
+
 run! "cmake -S #{LIBEDHOC.shellescape} -B #{BUILD.shellescape} " \
      "-DLIBEDHOC_ENABLE_TESTS=OFF " \
      "-DLIBEDHOC_BUILD_EXTERNAL_DEPS=ON " \
      "-DENABLE_TESTING=OFF " \
      "-DENABLE_PROGRAMS=OFF " \
      "-DCONFIG_LIBEDHOC_LOG_LEVEL=0 " \
+     "-DCMAKE_POSITION_INDEPENDENT_CODE=ON " \
      "-DCMAKE_BUILD_TYPE=Release"
 run! "cmake --build #{BUILD.shellescape} --config Release --target libedhoc"
 

@@ -25,7 +25,7 @@ This gem is currently developed locally inside the RSMP workspace. Use it from a
 path dependency:
 
 ```ruby
-gem 'edhoc', path: '../edhoc_gem'
+gem 'edhoc', path: '../ruby-edhoc'
 ```
 
 The native extension requires:
