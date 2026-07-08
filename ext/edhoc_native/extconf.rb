@@ -24,6 +24,7 @@ run! "cmake -S #{LIBEDHOC.shellescape} -B #{BUILD.shellescape} " \
      "-DENABLE_TESTING=OFF " \
      "-DENABLE_PROGRAMS=OFF " \
      "-DCONFIG_LIBEDHOC_LOG_LEVEL=0 " \
+     "-DCONFIG_LIBEDHOC_MAX_LEN_OF_CRED_KEY_ID=64 " \
      "-DCMAKE_POSITION_INDEPENDENT_CODE=ON " \
      "-DCMAKE_BUILD_TYPE=Release"
 run! "cmake --build #{BUILD.shellescape} --config Release --target libedhoc"

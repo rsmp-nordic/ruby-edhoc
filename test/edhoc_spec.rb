@@ -61,6 +61,41 @@ describe Edhoc do
     [initiator, responder]
   end
 
+  def kid_cbor_suite4_sessions(vector)
+    [kid_cbor_suite4_initiator(vector), kid_cbor_suite4_responder(vector)]
+  end
+
+  def kid_cbor_suite4_initiator(vector)
+    Edhoc::Suite4Session.new(
+      role: :initiator,
+      private_key: vector.fetch(:initiator_private_key),
+      credential: "\xA1\x62id\x64site".b,
+      credential_format: :kid_cbor,
+      kid: 'site-kid',
+      peer_public_key: vector.fetch(:responder_public_key),
+      peer_credential: "\xA1\x62id\x6Asupervisor".b,
+      peer_kid: 'supervisor-kid'
+    )
+  end
+
+  def kid_cbor_suite4_responder(vector)
+    Edhoc::Suite4Session.new(
+      role: :responder,
+      private_key: vector.fetch(:responder_private_key),
+      credential: "\xA1\x62id\x6Asupervisor".b,
+      credential_format: :kid_cbor,
+      kid: 'supervisor-kid',
+      peers: [
+        {
+          id: 'site-a',
+          public_key: vector.fetch(:initiator_public_key),
+          credential: "\xA1\x62id\x64site".b,
+          kid: 'site-kid'
+        }
+      ]
+    )
+  end
+
   def run_suite0_handshake(initiator, responder)
     message1 = initiator.compose_message1
     expect(message1.bytesize).to be > 0
@@ -124,6 +159,22 @@ describe Edhoc do
 
     expect(initiator_secret.bytesize).to be == 32
     expect(initiator_secret).to be == responder_secret
+  ensure
+    initiator&.close
+    responder&.close
+  end
+
+  it 'runs a suite 4 handshake with kid-identified CBOR credentials' do
+    vector = Edhoc::Native.suite0_test_vector
+    initiator, responder = kid_cbor_suite4_sessions(vector)
+    run_suite0_handshake(initiator, responder)
+
+    initiator_secret = initiator.export_prk(0, 32)
+    responder_secret = responder.export_prk(0, 32)
+
+    expect(initiator_secret.bytesize).to be == 32
+    expect(initiator_secret).to be == responder_secret
+    expect(responder.matched_peer_id).to be == 'site-a'
   ensure
     initiator&.close
     responder&.close

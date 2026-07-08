@@ -9,7 +9,10 @@ module Edhoc
       credential
       peer_public_key
       peer_credential
+      peer_kid
       peers
+      credential_format
+      kid
       connection_id
     ].freeze
     DEFAULT_INITIATOR_CONNECTION_ID = -14
@@ -75,6 +78,8 @@ module Edhoc
         String(options.fetch(:private_key)).b,
         String(options.fetch(:credential)).b
       ]
+      format = credential_format(options)
+      common += [format, String(options.fetch(:kid)).b] if format == 'kid_cbor'
 
       if options[:peers]
         common + [peer_tuples(options.fetch(:peers)), options.fetch(:connection_id)]
@@ -84,21 +89,40 @@ module Edhoc
     end
 
     def single_peer_arguments(options)
-      [
+      arguments = [
         String(options.fetch(:peer_public_key)).b,
-        String(options.fetch(:peer_credential)).b,
-        options.fetch(:connection_id)
+        String(options.fetch(:peer_credential)).b
       ]
+      arguments << String(options.fetch(:peer_kid)).b if credential_format(options) == 'kid_cbor'
+      arguments << options.fetch(:connection_id)
+      arguments
     end
 
     def peer_tuples(peers)
       peers.map do |peer|
-        [
+        tuple = [
           peer[:id] || peer['id'],
           String(peer.fetch(:public_key) { peer.fetch('public_key') }).b,
           String(peer.fetch(:credential) { peer.fetch('credential') }).b
         ]
+        tuple << String(peer.fetch(:kid) { peer.fetch('kid') }).b if credential_format_symbol == :kid_cbor
+        tuple
       end
+    end
+
+    def credential_format(options)
+      @credential_format ||= begin
+        format = options.fetch(:credential_format, :x509_chain).to_sym
+        unless %i[x509_chain kid_cbor].include?(format)
+          raise ArgumentError, 'credential_format must be :x509_chain or :kid_cbor'
+        end
+
+        format.to_s
+      end
+    end
+
+    def credential_format_symbol
+      @credential_format.to_sym
     end
 
     def default_connection_id(role)
