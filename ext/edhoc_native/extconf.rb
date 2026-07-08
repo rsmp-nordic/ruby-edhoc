@@ -15,6 +15,7 @@ run! "cmake -S #{LIBEDHOC.shellescape} -B #{BUILD.shellescape} " \
      "-DLIBEDHOC_BUILD_EXTERNAL_DEPS=ON " \
      "-DENABLE_TESTING=OFF " \
      "-DENABLE_PROGRAMS=OFF " \
+     "-DCONFIG_LIBEDHOC_LOG_LEVEL=0 " \
      "-DCMAKE_BUILD_TYPE=Release"
 run! "cmake --build #{BUILD.shellescape} --config Release --target libedhoc"
 
