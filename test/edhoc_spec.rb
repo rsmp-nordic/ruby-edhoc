@@ -1,6 +1,26 @@
 require_relative "test_helper"
+require "openssl"
 
 describe Edhoc do
+  def generated_identity(id)
+    key = OpenSSL::PKey.generate_key("ED25519")
+    certificate = OpenSSL::X509::Certificate.new
+    certificate.version = 2
+    certificate.serial = 1
+    certificate.subject = OpenSSL::X509::Name.new([["CN", id, OpenSSL::ASN1::UTF8STRING]])
+    certificate.issuer = certificate.subject
+    certificate.public_key = key
+    certificate.not_before = Time.now - 60
+    certificate.not_after = Time.now + 3600
+    certificate.sign(key, nil)
+
+    {
+      private_key: key.raw_private_key + key.raw_public_key,
+      public_key: key.raw_public_key,
+      credential: certificate.to_der
+    }
+  end
+
   def suite0_sessions(vector)
     initiator = Edhoc::Suite0Session.new(
       role: :initiator,
@@ -123,6 +143,40 @@ describe Edhoc do
     expect do
       responder.process_message3(initiator.compose_message3)
     end.to raise_exception(Edhoc::CredentialsError)
+  ensure
+    initiator&.close
+    responder&.close
+  end
+
+  it "names an untrusted x509 credential by common name" do
+    vector = Edhoc::Native.suite0_test_vector
+    site = generated_identity("RN+SI0002")
+    initiator = Edhoc::Suite0Session.new(
+      role: :initiator,
+      private_key: site.fetch(:private_key),
+      credential: site.fetch(:credential),
+      peer_public_key: vector.fetch(:responder_public_key),
+      peer_credential: vector.fetch(:responder_credential)
+    )
+    responder = Edhoc::Suite0Session.new(
+      role: :responder,
+      private_key: vector.fetch(:responder_private_key),
+      credential: vector.fetch(:responder_credential),
+      peers: [
+        {
+          id: "RN+SI0001",
+          public_key: vector.fetch(:initiator_public_key),
+          credential: vector.fetch(:initiator_credential)
+        }
+      ]
+    )
+
+    responder.process_message1(initiator.compose_message1)
+    initiator.process_message2(responder.compose_message2)
+
+    expect do
+      responder.process_message3(initiator.compose_message3)
+    end.to raise_exception(Edhoc::CredentialsError, message: be == "peer credential RN+SI0002 not trusted")
   ensure
     initiator&.close
     responder&.close

@@ -1,3 +1,5 @@
+require "openssl"
+
 module Edhoc
   class Suite0Session
     DEFAULT_INITIATOR_CONNECTION_ID = -14
@@ -23,12 +25,34 @@ module Edhoc
     def compose_message2 = @native.compose_message2
     def process_message2(message) = @native.process_message2(String(message).b)
     def compose_message3 = @native.compose_message3
-    def process_message3(message) = @native.process_message3(String(message).b)
+    def process_message3(message)
+      @native.process_message3(String(message).b)
+    rescue CredentialsError => e
+      raise CredentialsError, untrusted_credential_message(e)
+    end
+
     def export_prk(label, length) = @native.export_prk(Integer(label), Integer(length))
     def matched_peer_id = @native.matched_peer_id
     def close = @native.close
 
     private
+
+    def untrusted_credential_message(error)
+      id = untrusted_credential_id
+      return error.message unless id
+
+      "peer credential #{id} not trusted"
+    end
+
+    def untrusted_credential_id
+      credential = @native.untrusted_credential
+      return unless credential
+
+      certificate = OpenSSL::X509::Certificate.new(credential)
+      certificate.subject.to_a.find { |name, _value, _type| name == "CN" }&.fetch(1)
+    rescue OpenSSL::X509::CertificateError
+      nil
+    end
 
     def build_native_session(role:, private_key:, credential:, peer_public_key:, peer_credential:, peers:, connection_id:)
       if peers

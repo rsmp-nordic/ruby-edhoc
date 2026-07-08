@@ -61,6 +61,8 @@ struct suite0_session {
 	size_t peers_len;
 	size_t matched_peer_index;
 	bool matched_peer;
+	uint8_t *untrusted_credential;
+	size_t untrusted_credential_len;
 };
 
 static int suite0_signature(void *user_ctx, const void *kid,
@@ -213,6 +215,28 @@ static char *copy_optional_string(VALUE value, size_t *length)
 	return copy;
 }
 
+static void suite0_session_set_untrusted_credential(struct suite0_session *session,
+						    const uint8_t *credential,
+						    size_t credential_len)
+{
+	if (session == NULL)
+		return;
+
+	free(session->untrusted_credential);
+	session->untrusted_credential = NULL;
+	session->untrusted_credential_len = 0;
+
+	if (credential == NULL || credential_len == 0)
+		return;
+
+	session->untrusted_credential = malloc(credential_len);
+	if (session->untrusted_credential == NULL)
+		return;
+
+	memcpy(session->untrusted_credential, credential, credential_len);
+	session->untrusted_credential_len = credential_len;
+}
+
 static void suite0_peer_dispose(struct suite0_peer *peer)
 {
 	if (peer == NULL)
@@ -327,6 +351,12 @@ static int auth_cred_verify(void *user_ctx, struct edhoc_auth_creds *auth_cred,
 	if (auth_cred->x509_chain.nr_of_certs != 1)
 		return EDHOC_ERROR_CREDENTIALS_FAILURE;
 
+	suite0_session_set_untrusted_credential(
+		session,
+		auth_cred->x509_chain.cert[0],
+		auth_cred->x509_chain.cert_len[0]
+	);
+
 	for (size_t i = 0; i < session->peers_len; i++) {
 		struct suite0_peer *peer = &session->peers[i];
 
@@ -341,6 +371,7 @@ static int auth_cred_verify(void *user_ctx, struct edhoc_auth_creds *auth_cred,
 		*pub_key_len = peer->public_key_len;
 		session->matched_peer_index = i;
 		session->matched_peer = true;
+		suite0_session_set_untrusted_credential(session, NULL, 0);
 		return EDHOC_SUCCESS;
 	}
 
@@ -368,6 +399,9 @@ static void suite0_session_dispose(struct suite0_session *session)
 	free(session->credential);
 	session->credential = NULL;
 	session->credential_len = 0;
+	free(session->untrusted_credential);
+	session->untrusted_credential = NULL;
+	session->untrusted_credential_len = 0;
 	suite0_session_dispose_peers(session);
 }
 
@@ -631,6 +665,17 @@ static VALUE suite0_matched_peer_id(VALUE self)
 	return rb_str_new(peer->id, peer->id_len);
 }
 
+static VALUE suite0_untrusted_credential(VALUE self)
+{
+	struct suite0_session *session = get_session(self);
+
+	if (session->untrusted_credential == NULL || session->untrusted_credential_len == 0)
+		return Qnil;
+
+	return rb_str_new((const char *)session->untrusted_credential,
+			  session->untrusted_credential_len);
+}
+
 static VALUE native_library_version(VALUE self)
 {
 	(void)self;
@@ -707,5 +752,6 @@ void Init_edhoc_native(void)
 	rb_define_method(cSuite0Session, "process_message3", suite0_process_message3, 1);
 	rb_define_method(cSuite0Session, "export_prk", suite0_export_prk, 2);
 	rb_define_method(cSuite0Session, "matched_peer_id", suite0_matched_peer_id, 0);
+	rb_define_method(cSuite0Session, "untrusted_credential", suite0_untrusted_credential, 0);
 	rb_define_method(cSuite0Session, "close", suite0_close, 0);
 }
