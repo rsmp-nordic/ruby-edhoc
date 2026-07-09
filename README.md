@@ -31,12 +31,8 @@ The native extension requires:
 - CMake
 - a C compiler
 
-`libedhoc` is vendored under `vendor/libedhoc`. Its required submodules must be present:
-
-```sh
-cd vendor/libedhoc
-git submodule update --init --depth 1 externals/mbedtls externals/zcbor externals/compact25519 externals/Unity
-```
+`libedhoc` and its external dependencies are vendored under `vendor/libedhoc`; no submodule setup is
+needed when installing or building this gem.
 
 Build and test:
 
@@ -135,3 +131,37 @@ system.
 
 The Ruby wrapper is MIT licensed. The vendored `libedhoc` project is also MIT licensed; see
 `vendor/libedhoc/LICENSE`.
+
+## Updating Vendored libedhoc
+
+The vendored C library is refreshed with a rake task. It checks out upstream `libedhoc` in a temporary
+directory, initializes the submodules required by this gem, copies the resulting tree into
+`vendor/libedhoc`, and writes the exact commits to `vendor/libedhoc/ruby-edhoc-vendor.yml`.
+
+Update from the ref recorded in `vendor/libedhoc/ruby-edhoc-vendor.yml`:
+
+```sh
+bundle exec rake vendor:update
+```
+
+If the metadata file does not exist yet, this falls back to `main`.
+
+Update from another branch, tag, or commit:
+
+```sh
+bundle exec rake 'vendor:update[main]'
+```
+
+The task refuses to run with uncommitted changes present. Review and commit the resulting
+`vendor/libedhoc` changes together with the updated metadata file.
+
+After re-vendoring, compile the native extension and run the checks before committing:
+
+```sh
+bundle exec rake compile
+bundle exec sus
+bundle exec rubocop
+```
+
+This is the required verification step for dependency updates. It confirms that the refreshed C sources
+and externals still build through the Ruby native extension and that the Ruby wrapper tests pass.
