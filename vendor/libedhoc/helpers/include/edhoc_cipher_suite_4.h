@@ -2,13 +2,13 @@
  * \file    edhoc_cipher_suite_4.h
  * \author  Kamil Kielbasa
  * \brief   Cipher suite 4 contains:
- *            - AEAD algorithm                      = ChaCha20-Poly1305
+ *            - AEAD algorithm                      = ChaCha20/Poly1305
  *            - hash algorithm                      = SHA-256
  *            - MAC length in bytes (Static DH)     = 16
  *            - key exchange algorithm (ECDH curve) = X25519
  *            - signature algorithm                 = EdDSA
  *
- * \copyright Copyright (c) 2025
+ * \copyright Copyright (c) 2026
  * 
  */
 
@@ -41,7 +41,7 @@
  * \brief Get EDHOC crypto structure for cipher suite 4.
  *
  * Returns a pointer to the cryptographic operations structure implementing
- * cipher suite 4 algorithms (ChaCha20-Poly1305, SHA-256, X25519, EdDSA).
+ * cipher suite 4 algorithms (ChaCha20/Poly1305, SHA-256, X25519, EdDSA).
  *
  * \return Pointer to cipher suite 4 crypto operations structure.
  */
@@ -62,7 +62,7 @@ const struct edhoc_keys *edhoc_cipher_suite_4_get_keys(void);
  *
  * Returns a pointer to a pre-initialized \c struct \c edhoc_cipher_suite
  * holding the canonical algorithm parameters of cipher suite 4
- * (value 4, ChaCha20-Poly1305, SHA-256, X25519, EdDSA).
+ * (value 4, ChaCha20/Poly1305, SHA-256, X25519, EdDSA).
  *
  * \return Pointer to cipher suite 4 descriptor.
  */
@@ -274,14 +274,15 @@ int edhoc_cipher_suite_4_expand(void *user_context, const void *key_id,
 				size_t output_keying_material_length);
 
 /** 
- * \brief AEAD encrypt using ChaCha20-Poly1305.
+ * \brief AEAD encrypt using ChaCha20/Poly1305.
  *
- * Encrypts plaintext using ChaCha20-Poly1305 with 256-bit key, 128-bit tag, and 12-byte nonce.
- * Provides authenticated encryption with associated data (AEAD).
+ * Encrypts plaintext using ChaCha20/Poly1305 with 256-bit key, 128-bit tag,
+ * and 12-byte nonce. Provides authenticated encryption with associated data
+ * (AEAD).
  *
  * \param[in] user_context             User-provided context pointer.
  * \param[in] key_id                   Key identifier of the encryption key.
- * \param[in] nonce                    Nonce (12 bytes for ChaCha20-Poly1305).
+ * \param[in] nonce                    Nonce (12 bytes for ChaCha20/Poly1305).
  * \param nonce_length                 Length of the \p nonce buffer in bytes.
  * \param[in] additional_data          Additional authenticated data (can be NULL).
  * \param additional_data_length       Length of the \p additional_data buffer in bytes.
@@ -310,14 +311,15 @@ int edhoc_cipher_suite_4_encrypt(void *user_context, const void *key_id,
 				 size_t *ciphertext_length);
 
 /** 
- * \brief AEAD decrypt using ChaCha20-Poly1305.
+ * \brief AEAD decrypt using ChaCha20/Poly1305.
  *
- * Decrypts ciphertext using ChaCha20-Poly1305 with 256-bit key, 128-bit tag, and 12-byte nonce.
- * Provides authenticated decryption with associated data (AEAD).
+ * Decrypts ciphertext using ChaCha20/Poly1305 with 256-bit key, 128-bit tag,
+ * and 12-byte nonce. Provides authenticated decryption with associated data
+ * (AEAD).
  *
  * \param[in] user_context             User-provided context pointer.
  * \param[in] key_id                   Key identifier of the decryption key.
- * \param[in] nonce                    Nonce (12 bytes for ChaCha20-Poly1305).
+ * \param[in] nonce                    Nonce (12 bytes for ChaCha20/Poly1305).
  * \param nonce_length                 Length of the \p nonce buffer in bytes.
  * \param[in] additional_data          Additional authenticated data (can be NULL).
  * \param additional_data_length       Length of the \p additional_data buffer in bytes.

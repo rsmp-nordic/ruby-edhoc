@@ -1,0 +1,22 @@
+---
+libedhoc:
+  remote: https://github.com/kamil-kielbasa/libedhoc.git
+  ref: feat/cipher_suite_4
+  commit: 7bd0956e54d4f9711dfca17eb2d9507c2e05a837
+externals:
+  Unity:
+    path: externals/Unity
+    commit: 73237c5d224169c7b4d2ec8321f9ac92e8071708
+    remote: https://github.com/ThrowTheSwitch/Unity.git
+  compact25519:
+    path: externals/compact25519
+    commit: 1ed9c87ab6ed3bcbbb783289ea14e077a40ef127
+    remote: https://github.com/DavyLandman/compact25519.git
+  mbedtls:
+    path: externals/mbedtls
+    commit: edb8fec9882084344a314368ac7fd957a187519c
+    remote: https://github.com/Mbed-TLS/mbedtls.git
+  zcbor:
+    path: externals/zcbor
+    commit: d3093b5684f62268c7f27f8a5079f166772619de
+    remote: https://github.com/NordicSemiconductor/zcbor.git

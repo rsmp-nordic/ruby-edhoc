@@ -3,7 +3,7 @@
  * \author  Kamil Kielbasa
  * \brief   Example implementation of cipher suite 4.
  * 
- * \copyright Copyright (c) 2025
+ * \copyright Copyright (c) 2026
  * 
  */
 
@@ -112,7 +112,10 @@ int edhoc_cipher_suite_4_key_import(void *user_ctx,
 
 	case EDHOC_KT_ENCRYPT:
 		psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_ENCRYPT);
-		psa_set_key_algorithm(&attr, PSA_ALG_CHACHA20_POLY1305);
+		psa_set_key_algorithm(
+			&attr, PSA_ALG_AEAD_WITH_SHORTENED_TAG(
+				       PSA_ALG_CHACHA20_POLY1305,
+				       EDHOC_CIPHER_SUITE_4_AEAD_TAG_LEN));
 		psa_set_key_type(&attr, PSA_KEY_TYPE_CHACHA20);
 		psa_set_key_bits(&attr,
 				 (size_t)PSA_BYTES_TO_BITS(
@@ -121,7 +124,10 @@ int edhoc_cipher_suite_4_key_import(void *user_ctx,
 
 	case EDHOC_KT_DECRYPT:
 		psa_set_key_usage_flags(&attr, PSA_KEY_USAGE_DECRYPT);
-		psa_set_key_algorithm(&attr, PSA_ALG_CHACHA20_POLY1305);
+		psa_set_key_algorithm(
+			&attr, PSA_ALG_AEAD_WITH_SHORTENED_TAG(
+				       PSA_ALG_CHACHA20_POLY1305,
+				       EDHOC_CIPHER_SUITE_4_AEAD_TAG_LEN));
 		psa_set_key_type(&attr, PSA_KEY_TYPE_CHACHA20);
 		psa_set_key_bits(&attr,
 				 (size_t)PSA_BYTES_TO_BITS(

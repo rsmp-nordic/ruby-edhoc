@@ -84,8 +84,8 @@ EDHOC cipher suites
      - | AES-CCM-16-64-128, SHA-256, 8,
        | P-256, ES256, AES-CCM-16-64-128, SHA-256
    * - 4
-     - | 24, -16, 16,
-       | 4, -8, 24, -16
+     - | 24, -16, 16, 4,
+       | -8, 24, -16
      - | ChaCha20/Poly1305, SHA-256, 16,
        | X25519, EdDSA, ChaCha20/Poly1305, SHA-256
    * - 24
