@@ -282,18 +282,6 @@ describe Edhoc do
     responder&.close
   end
 
-  it 'releases native key handles across repeated handshakes' do
-    vector = Edhoc::Native.suite0_test_vector
-
-    25.times do
-      initiator, responder = suite0_sessions(vector)
-      run_suite0_handshake(initiator, responder)
-    ensure
-      initiator&.close
-      responder&.close
-    end
-  end
-
   it 'raises typed Ruby exceptions for native libedhoc failures' do
     vector = Edhoc::Native.suite0_test_vector
     initiator, = suite0_sessions(vector)

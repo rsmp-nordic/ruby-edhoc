@@ -25,17 +25,8 @@ Gem::Specification.new do |spec|
     'LICENSE.txt',
     'lib/**/*.rb',
     'ext/**/*.{c,h,rb}',
-    'vendor/libedhoc/include/**/*',
-    'vendor/libedhoc/library/**/*',
-    'vendor/libedhoc/backends/**/*',
-    'vendor/libedhoc/helpers/**/*',
-    'vendor/libedhoc/tests/include/**/*',
-    'vendor/libedhoc/cmake/**/*',
-    'vendor/libedhoc/CMakeLists.txt',
-    'vendor/libedhoc/externals/zcbor/**/*',
-    'vendor/libedhoc/externals/compact25519/**/*',
-    'vendor/libedhoc/externals/mbedtls/**/*',
-    'vendor/libedhoc/externals/Unity/**/*'
+    'vendor/libedhoc/**/*',
+    'vendor/libedhoc/.gitmodules'
   ]
   spec.extensions = ['ext/edhoc_native/extconf.rb']
   spec.require_paths = ['lib']
