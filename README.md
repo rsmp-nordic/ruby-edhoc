@@ -31,6 +31,10 @@ The native extension requires:
 - CMake
 - a C compiler
 
+On `mingw-ucrt` Ruby, the build selects CMake's MSYS Makefiles generator and
+GCC so that libedhoc and the Ruby extension use the same RubyInstaller/MSYS2
+toolchain. Set `CMAKE_GENERATOR` explicitly to override the default generator.
+
 `libedhoc` and its external dependencies are vendored under `vendor/libedhoc`; no submodule setup is
 needed when installing or building this gem.
 
