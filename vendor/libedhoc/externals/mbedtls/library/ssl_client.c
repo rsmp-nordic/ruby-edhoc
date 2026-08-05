@@ -5,19 +5,18 @@
  *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
-#include "common.h"
+#include "ssl_misc.h"
 
 #if defined(MBEDTLS_SSL_CLI_C)
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3) || defined(MBEDTLS_SSL_PROTO_TLS1_2)
 
 #include <string.h>
 
-#include "mbedtls/debug.h"
+#include "debug_internal.h"
 #include "mbedtls/error.h"
 #include "mbedtls/platform.h"
 
 #include "ssl_client.h"
-#include "ssl_misc.h"
 #include "ssl_tls13_keys.h"
 #include "ssl_debug_helpers.h"
 
@@ -142,7 +141,7 @@ static int ssl_write_alpn_ext(mbedtls_ssl_context *ssl,
      *     ProtocolName protocol_name_list<2..2^16-1>
      * } ProtocolNameList;
      */
-    for (const char **cur = ssl->conf->alpn_list; *cur != NULL; cur++) {
+    for (const char *const *cur = ssl->conf->alpn_list; *cur != NULL; cur++) {
         /*
          * mbedtls_ssl_conf_set_alpn_protocols() checked that the length of
          * protocol names is less than 255.
@@ -155,7 +154,7 @@ static int ssl_write_alpn_ext(mbedtls_ssl_context *ssl,
         p += protocol_name_len;
     }
 
-    *out_len = p - buf;
+    *out_len = (size_t) (p - buf);
 
     /* List length = *out_len - 2 (ext_type) - 2 (ext_len) - 2 (list_len) */
     MBEDTLS_PUT_UINT16_BE(*out_len - 6, buf, 4);
@@ -223,7 +222,7 @@ static int ssl_write_supported_groups_ext(mbedtls_ssl_context *ssl,
     unsigned char *p = buf;
     unsigned char *named_group_list; /* Start of named_group_list */
     size_t named_group_list_len;     /* Length of named_group_list */
-    const uint16_t *group_list = mbedtls_ssl_get_groups(ssl);
+    const uint16_t *group_list = ssl->conf->group_list;
 
     *out_len = 0;
 
@@ -285,7 +284,7 @@ static int ssl_write_supported_groups_ext(mbedtls_ssl_context *ssl,
     }
 
     /* Length of named_group_list */
-    named_group_list_len = p - named_group_list;
+    named_group_list_len = (size_t) (p - named_group_list);
     if (named_group_list_len == 0) {
         MBEDTLS_SSL_DEBUG_MSG(1, ("No group available."));
         return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
@@ -301,7 +300,7 @@ static int ssl_write_supported_groups_ext(mbedtls_ssl_context *ssl,
     MBEDTLS_SSL_DEBUG_BUF(3, "Supported groups extension",
                           buf + 4, named_group_list_len + 2);
 
-    *out_len = p - buf;
+    *out_len = (size_t) (p - buf);
 
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
     mbedtls_ssl_tls13_set_hs_sent_ext_mask(
@@ -391,14 +390,14 @@ static int ssl_write_client_hello_cipher_suites(
     }
 
     /* Write the cipher_suites length in number of bytes */
-    cipher_suites_len = p - cipher_suites;
+    cipher_suites_len = (size_t) (p - cipher_suites);
     MBEDTLS_PUT_UINT16_BE(cipher_suites_len, buf, 0);
     MBEDTLS_SSL_DEBUG_MSG(3,
                           ("client hello, got %" MBEDTLS_PRINTF_SIZET " cipher suites",
                            cipher_suites_len/2));
 
     /* Output the total length of cipher_suites field. */
-    *out_len = p - buf;
+    *out_len = (size_t) (p - buf);
 
     return 0;
 }
@@ -609,7 +608,7 @@ static int ssl_write_client_hello_body(mbedtls_ssl_context *ssl,
         int ssl_write_supported_groups_ext_flags = 0;
 
 #if defined(MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_SOME_EPHEMERAL_ENABLED)
-        if (propose_tls13 && mbedtls_ssl_conf_tls13_some_ephemeral_enabled(ssl)) {
+        if (propose_tls13 && mbedtls_ssl_conf_tls13_is_some_ephemeral_enabled(ssl)) {
             ssl_write_supported_groups_ext_flags |=
                 SSL_WRITE_SUPPORTED_GROUPS_EXT_TLS1_3_FLAG;
         }
@@ -637,7 +636,7 @@ static int ssl_write_client_hello_body(mbedtls_ssl_context *ssl,
     int write_sig_alg_ext = 0;
 #if defined(MBEDTLS_SSL_PROTO_TLS1_3)
     write_sig_alg_ext = write_sig_alg_ext ||
-                        (propose_tls13 && mbedtls_ssl_conf_tls13_ephemeral_enabled(ssl));
+                        (propose_tls13 && mbedtls_ssl_conf_tls13_is_ephemeral_enabled(ssl));
 #endif
 #if defined(MBEDTLS_SSL_PROTO_TLS1_2)
     write_sig_alg_ext = write_sig_alg_ext || propose_tls12;
@@ -668,7 +667,7 @@ static int ssl_write_client_hello_body(mbedtls_ssl_context *ssl,
     /* The "pre_shared_key" extension (RFC 8446 Section 4.2.11)
      * MUST be the last extension in the ClientHello.
      */
-    if (propose_tls13 && mbedtls_ssl_conf_tls13_some_psk_enabled(ssl)) {
+    if (propose_tls13 && mbedtls_ssl_conf_tls13_is_some_psk_enabled(ssl)) {
         ret = mbedtls_ssl_tls13_write_identities_of_pre_shared_key_ext(
             ssl, p, end, &output_len, binders_len);
         if (ret != 0) {
@@ -679,7 +678,7 @@ static int ssl_write_client_hello_body(mbedtls_ssl_context *ssl,
 #endif /* MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_SOME_PSK_ENABLED */
 
     /* Write the length of the list of extensions. */
-    extensions_len = p - p_extensions_len - 2;
+    extensions_len = (size_t) (p - p_extensions_len) - 2;
 
     if (extensions_len == 0) {
         p = p_extensions_len;
@@ -691,12 +690,7 @@ static int ssl_write_client_hello_body(mbedtls_ssl_context *ssl,
                               p_extensions_len, extensions_len);
     }
 
-#if defined(MBEDTLS_SSL_PROTO_TLS1_3)
-    MBEDTLS_SSL_PRINT_EXTS(
-        3, MBEDTLS_SSL_HS_CLIENT_HELLO, handshake->sent_extensions);
-#endif
-
-    *out_len = p - buf;
+    *out_len = (size_t) (p - buf);
     return 0;
 }
 
@@ -731,9 +725,8 @@ static int ssl_generate_random(mbedtls_ssl_context *ssl)
 #endif /* MBEDTLS_HAVE_TIME */
     }
 
-    ret = ssl->conf->f_rng(ssl->conf->p_rng,
-                           randbytes + gmt_unix_time_len,
-                           MBEDTLS_CLIENT_HELLO_RANDOM_LEN - gmt_unix_time_len);
+    ret = psa_generate_random(randbytes + gmt_unix_time_len,
+                              MBEDTLS_CLIENT_HELLO_RANDOM_LEN - gmt_unix_time_len);
     return ret;
 }
 
@@ -756,10 +749,10 @@ static int ssl_prepare_client_hello(mbedtls_ssl_context *ssl)
     if (ssl->handshake->resume != 0 &&
         session_negotiate->tls_version == MBEDTLS_SSL_VERSION_TLS1_3 &&
         session_negotiate->ticket != NULL) {
-        mbedtls_time_t now = mbedtls_time(NULL);
-        uint64_t age = (uint64_t) (now - session_negotiate->ticket_received);
-        if (session_negotiate->ticket_received > now ||
-            age > session_negotiate->ticket_lifetime) {
+        mbedtls_ms_time_t now = mbedtls_ms_time();
+        mbedtls_ms_time_t age = now - session_negotiate->ticket_reception_time;
+        if (age < 0 ||
+            age > (mbedtls_ms_time_t) session_negotiate->ticket_lifetime * 1000) {
             /* Without valid ticket, disable session resumption.*/
             MBEDTLS_SSL_DEBUG_MSG(
                 3, ("Ticket expired, disable session resumption"));
@@ -769,11 +762,6 @@ static int ssl_prepare_client_hello(mbedtls_ssl_context *ssl)
 #endif /* MBEDTLS_SSL_PROTO_TLS1_3 &&
           MBEDTLS_SSL_SESSION_TICKETS &&
           MBEDTLS_HAVE_TIME */
-
-    if (ssl->conf->f_rng == NULL) {
-        MBEDTLS_SSL_DEBUG_MSG(1, ("no RNG provided"));
-        return MBEDTLS_ERR_SSL_NO_RNG;
-    }
 
     /* Bet on the highest configured version if we are not in a TLS 1.2
      * renegotiation or session resumption.
@@ -802,10 +790,15 @@ static int ssl_prepare_client_hello(mbedtls_ssl_context *ssl)
         (ssl->handshake->cookie == NULL))
 #endif
     {
-        ret = ssl_generate_random(ssl);
-        if (ret != 0) {
-            MBEDTLS_SSL_DEBUG_RET(1, "Random bytes generation failed", ret);
-            return ret;
+#if defined(MBEDTLS_SSL_PROTO_TLS1_3)
+        if (!ssl->handshake->hello_retry_request_flag)
+#endif
+        {
+            ret = ssl_generate_random(ssl);
+            if (ret != 0) {
+                MBEDTLS_SSL_DEBUG_RET(1, "Random bytes generation failed", ret);
+                return ret;
+            }
         }
     }
 
@@ -873,9 +866,9 @@ static int ssl_prepare_client_hello(mbedtls_ssl_context *ssl)
     if (session_id_len != session_negotiate->id_len) {
         session_negotiate->id_len = session_id_len;
         if (session_id_len > 0) {
-            ret = ssl->conf->f_rng(ssl->conf->p_rng,
-                                   session_negotiate->id,
-                                   session_id_len);
+
+            ret = psa_generate_random(session_negotiate->id,
+                                      session_id_len);
             if (ret != 0) {
                 MBEDTLS_SSL_DEBUG_RET(1, "creating session id failed", ret);
                 return ret;
@@ -950,8 +943,8 @@ int mbedtls_ssl_write_client_hello(mbedtls_ssl_context *ssl)
          */
         mbedtls_ssl_handshake_set_state(ssl, MBEDTLS_SSL_SERVER_HELLO);
 
-        if ((ret = mbedtls_ssl_write_handshake_msg(ssl)) != 0) {
-            MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg", ret);
+        if ((ret = mbedtls_ssl_write_handshake_msg_ext(ssl, 1, 1)) != 0) {
+            MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_ssl_write_handshake_msg_ext", ret);
             return ret;
         }
 
@@ -1006,6 +999,11 @@ int mbedtls_ssl_write_client_hello(mbedtls_ssl_context *ssl)
         }
 #endif
     }
+
+#if defined(MBEDTLS_SSL_PROTO_TLS1_3)
+    MBEDTLS_SSL_PRINT_EXTS(
+        3, MBEDTLS_SSL_HS_CLIENT_HELLO, ssl->handshake->sent_extensions);
+#endif
 
 cleanup:
 

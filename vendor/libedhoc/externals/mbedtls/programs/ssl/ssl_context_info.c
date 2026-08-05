@@ -1,11 +1,18 @@
 /*
- *  MbedTLS SSL context deserializer from base64 code
+ *  Mbed TLS SSL context deserializer from base64 code
  *
  *  Copyright The Mbed TLS Contributors
  *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
-#define MBEDTLS_ALLOW_PRIVATE_ACCESS
+/* On Mingw-w64, force the use of a C99-compliant printf() and friends.
+ * This is necessary on older versions of Mingw and/or Windows runtimes
+ * where snprintf does not always zero-terminate the buffer, and does
+ * not support formats such as "%zu" for size_t and "%lld" for long long.
+ */
+#if !defined(__USE_MINGW_ANSI_STDIO)
+#define __USE_MINGW_ANSI_STDIO 1
+#endif
 
 #include "mbedtls/build_info.h"
 #include "mbedtls/debug.h"
@@ -113,12 +120,12 @@ const char buf_ln_err[] = "Buffer does not have enough data to complete the pars
 /*
  * Basic printing functions
  */
-void print_version(void)
+static void print_version(void)
 {
     printf("%s v%d.%d\n", PROG_NAME, VER_MAJOR, VER_MINOR);
 }
 
-void print_usage(void)
+static void print_usage(void)
 {
     print_version();
     printf("\nThis program is used to deserialize an Mbed TLS SSL session from the base64 code provided\n"
@@ -140,7 +147,7 @@ void print_usage(void)
         );
 }
 
-void printf_dbg(const char *str, ...)
+static void printf_dbg(const char *str, ...)
 {
     if (debug) {
         va_list args;
@@ -153,7 +160,7 @@ void printf_dbg(const char *str, ...)
 }
 
 MBEDTLS_PRINTF_ATTRIBUTE(1, 2)
-void printf_err(const char *str, ...)
+static void printf_err(const char *str, ...)
 {
     va_list args;
     va_start(args, str);
@@ -167,7 +174,7 @@ void printf_err(const char *str, ...)
 /*
  * Exit from the program in case of error
  */
-void error_exit(void)
+static void error_exit(void)
 {
     if (NULL != b64_file) {
         fclose(b64_file);
@@ -178,7 +185,7 @@ void error_exit(void)
 /*
  * This function takes the input arguments of this program
  */
-void parse_arguments(int argc, char *argv[])
+static void parse_arguments(int argc, char *argv[])
 {
     int i = 1;
 
@@ -225,7 +232,7 @@ void parse_arguments(int argc, char *argv[])
 /*
  * This function prints base64 code to the stdout
  */
-void print_b64(const uint8_t *b, size_t len)
+static void print_b64(const uint8_t *b, size_t len)
 {
     size_t i = 0;
     const uint8_t *end = b + len;
@@ -249,8 +256,8 @@ void print_b64(const uint8_t *b, size_t len)
  * /p in_line   number of bytes in one line
  * /p prefix    prefix for the new lines
  */
-void print_hex(const uint8_t *b, size_t len,
-               const size_t in_line, const char *prefix)
+static void print_hex(const uint8_t *b, size_t len,
+                      const size_t in_line, const char *prefix)
 {
     size_t i = 0;
     const uint8_t *end = b + len;
@@ -273,7 +280,7 @@ void print_hex(const uint8_t *b, size_t len,
 /*
  *  Print the value of time_t in format e.g. 2020-01-23 13:05:59
  */
-void print_time(const uint64_t *time)
+static void print_time(const uint64_t *time)
 {
 #if defined(MBEDTLS_HAVE_TIME)
     char buf[20];
@@ -294,7 +301,7 @@ void print_time(const uint64_t *time)
 /*
  * Print the input string if the bit is set in the value
  */
-void print_if_bit(const char *str, int bit, int val)
+static void print_if_bit(const char *str, int bit, int val)
 {
     if (bit & val) {
         printf("\t%s\n", str);
@@ -304,7 +311,7 @@ void print_if_bit(const char *str, int bit, int val)
 /*
  * Return pointer to hardcoded "enabled" or "disabled" depending on the input value
  */
-const char *get_enabled_str(int is_en)
+static const char *get_enabled_str(int is_en)
 {
     return (is_en) ? "enabled" : "disabled";
 }
@@ -312,7 +319,7 @@ const char *get_enabled_str(int is_en)
 /*
  * Return pointer to hardcoded MFL string value depending on the MFL code at the input
  */
-const char *get_mfl_str(int mfl_code)
+static const char *get_mfl_str(int mfl_code)
 {
     switch (mfl_code) {
         case MBEDTLS_SSL_MAX_FRAG_LEN_NONE:
@@ -345,7 +352,7 @@ const char *get_mfl_str(int mfl_code)
  * \retval      number of bytes written in to the b64 buffer or 0 in case no more
  *              data was found
  */
-size_t read_next_b64_code(uint8_t **b64, size_t *max_len)
+static size_t read_next_b64_code(uint8_t **b64, size_t *max_len)
 {
     int valid_balance = 0;  /* balance between valid and invalid characters */
     size_t len = 0;
@@ -445,7 +452,7 @@ size_t read_next_b64_code(uint8_t **b64, size_t *max_len)
  * /p ssl   pointer to serialized certificate
  * /p len   number of bytes in the buffer
  */
-void print_deserialized_ssl_cert(const uint8_t *ssl, uint32_t len)
+static void print_deserialized_ssl_cert(const uint8_t *ssl, uint32_t len)
 {
     enum { STRLEN = 4096 };
     mbedtls_x509_crt crt;
@@ -511,8 +518,8 @@ void print_deserialized_ssl_cert(const uint8_t *ssl, uint32_t len)
  * /p len               number of bytes in the buffer
  * /p session_cfg_flag  session configuration flags
  */
-void print_deserialized_ssl_session(const uint8_t *ssl, uint32_t len,
-                                    int session_cfg_flag)
+static void print_deserialized_ssl_session(const uint8_t *ssl, uint32_t len,
+                                           int session_cfg_flag)
 {
     const struct mbedtls_ssl_ciphersuite_t *ciphersuite_info;
     int ciphersuite_id;
@@ -547,28 +554,10 @@ void print_deserialized_ssl_session(const uint8_t *ssl, uint32_t len,
     if (ciphersuite_info == NULL) {
         printf_err("Cannot find ciphersuite info\n");
     } else {
-        const mbedtls_cipher_info_t *cipher_info;
-#if defined(MBEDTLS_MD_C)
-        const mbedtls_md_info_t *md_info;
-#endif
-
-        printf("\tciphersuite    : %s\n", ciphersuite_info->name);
-        printf("\tcipher flags   : 0x%02X\n", ciphersuite_info->flags);
-
-        cipher_info = mbedtls_cipher_info_from_type(ciphersuite_info->cipher);
-        if (cipher_info == NULL) {
-            printf_err("Cannot find cipher info\n");
-        } else {
-            printf("\tcipher         : %s\n", cipher_info->name);
-        }
-#if defined(MBEDTLS_MD_C)
-        md_info = mbedtls_md_info_from_type(ciphersuite_info->mac);
-        if (md_info == NULL) {
-            printf_err("Cannot find Message-Digest info\n");
-        } else {
-            printf("\tMessage-Digest : %s\n", mbedtls_md_get_name(md_info));
-        }
-#endif /* MBEDTLS_MD_C */
+        printf("\tciphersuite    : %s\n", mbedtls_ssl_ciphersuite_get_name(ciphersuite_info));
+        printf("\tcipher flags   : 0x%02X\n", ciphersuite_info->MBEDTLS_PRIVATE(flags));
+        printf("\tcipher type     : %d\n", ciphersuite_info->MBEDTLS_PRIVATE(cipher));
+        printf("\tMessage-Digest : %d\n", ciphersuite_info->MBEDTLS_PRIVATE(mac));
     }
 
     CHECK_SSL_END(1);
@@ -743,7 +732,7 @@ void print_deserialized_ssl_session(const uint8_t *ssl, uint32_t len,
  * /p ssl   pointer to serialized session
  * /p len   number of bytes in the buffer
  */
-void print_deserialized_ssl_context(const uint8_t *ssl, size_t len)
+static void print_deserialized_ssl_context(const uint8_t *ssl, size_t len)
 {
     const uint8_t *end = ssl + len;
     uint32_t session_len;
@@ -922,14 +911,12 @@ int main(int argc, char *argv[])
     size_t ssl_max_len = SSL_INIT_LEN;
     size_t ssl_len = 0;
 
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
     psa_status_t status = psa_crypto_init();
     if (status != PSA_SUCCESS) {
         mbedtls_fprintf(stderr, "Failed to initialize PSA Crypto implementation: %d\n",
                         (int) status);
         return MBEDTLS_ERR_SSL_HW_ACCEL_FAILED;
     }
-#endif /* MBEDTLS_USE_PSA_CRYPTO */
 
     /* The 'b64_file' is opened when parsing arguments to check that the
      * file name is correct */
@@ -999,9 +986,7 @@ int main(int argc, char *argv[])
         printf("Finished. No valid base64 code found\n");
     }
 
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
     mbedtls_psa_crypto_free();
-#endif /* MBEDTLS_USE_PSA_CRYPTO */
 
     return 0;
 }

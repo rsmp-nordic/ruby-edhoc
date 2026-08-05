@@ -9,18 +9,13 @@
 
 #include "mbedtls/platform.h"
 
-#if !defined(MBEDTLS_BIGNUM_C) || !defined(MBEDTLS_PEM_PARSE_C) || \
-    !defined(MBEDTLS_ENTROPY_C) || !defined(MBEDTLS_SSL_TLS_C) ||  \
-    !defined(MBEDTLS_SSL_SRV_C) || !defined(MBEDTLS_NET_C) ||      \
-    !defined(MBEDTLS_RSA_C) || !defined(MBEDTLS_CTR_DRBG_C) ||     \
-    !defined(MBEDTLS_X509_CRT_PARSE_C) || !defined(MBEDTLS_FS_IO)
+#if !defined(MBEDTLS_NET_C) || !defined(MBEDTLS_SSL_SRV_C) ||           \
+    !defined(MBEDTLS_PEM_PARSE_C) || !defined(MBEDTLS_X509_CRT_PARSE_C)
 int main(void)
 {
-    mbedtls_printf("MBEDTLS_BIGNUM_C and/or MBEDTLS_ENTROPY_C "
-                   "and/or MBEDTLS_SSL_TLS_C and/or MBEDTLS_SSL_SRV_C and/or "
-                   "MBEDTLS_NET_C and/or MBEDTLS_RSA_C and/or "
-                   "MBEDTLS_CTR_DRBG_C and/or MBEDTLS_X509_CRT_PARSE_C "
-                   "and/or MBEDTLS_PEM_PARSE_C not defined.\n");
+    mbedtls_printf("MBEDTLS_NET_C and/or MBEDTLS_SSL_SRV_C and/or "
+                   "MBEDTLS_PEM_PARSE_C and/or MBEDTLS_X509_CRT_PARSE_C "
+                   "not defined.\n");
     mbedtls_exit(0);
 }
 #else
@@ -32,8 +27,6 @@ int main(void)
 #include <windows.h>
 #endif
 
-#include "mbedtls/entropy.h"
-#include "mbedtls/ctr_drbg.h"
 #include "mbedtls/x509.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/net_sockets.h"
@@ -68,10 +61,7 @@ int main(void)
     int ret, len;
     mbedtls_net_context listen_fd, client_fd;
     unsigned char buf[1024];
-    const char *pers = "ssl_server";
 
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
     mbedtls_x509_crt srvcert;
@@ -89,10 +79,7 @@ int main(void)
 #endif
     mbedtls_x509_crt_init(&srvcert);
     mbedtls_pk_init(&pkey);
-    mbedtls_entropy_init(&entropy);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
 
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
     psa_status_t status = psa_crypto_init();
     if (status != PSA_SUCCESS) {
         mbedtls_fprintf(stderr, "Failed to initialize PSA Crypto implementation: %d\n",
@@ -100,7 +87,6 @@ int main(void)
         ret = MBEDTLS_ERR_SSL_HW_ACCEL_FAILED;
         goto exit;
     }
-#endif /* MBEDTLS_USE_PSA_CRYPTO */
 
 #if defined(MBEDTLS_DEBUG_C)
     mbedtls_debug_set_threshold(DEBUG_LEVEL);
@@ -111,13 +97,6 @@ int main(void)
      */
     mbedtls_printf("  . Seeding the random number generator...");
     fflush(stdout);
-
-    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                                     (const unsigned char *) pers,
-                                     strlen(pers))) != 0) {
-        mbedtls_printf(" failed\n  ! mbedtls_ctr_drbg_seed returned %d\n", ret);
-        goto exit;
-    }
 
     mbedtls_printf(" ok\n");
 
@@ -147,8 +126,7 @@ int main(void)
     }
 
     ret =  mbedtls_pk_parse_key(&pkey, (const unsigned char *) mbedtls_test_srv_key,
-                                mbedtls_test_srv_key_len, NULL, 0,
-                                mbedtls_ctr_drbg_random, &ctr_drbg);
+                                mbedtls_test_srv_key_len, NULL, 0);
     if (ret != 0) {
         mbedtls_printf(" failed\n  !  mbedtls_pk_parse_key returned %d\n\n", ret);
         goto exit;
@@ -183,7 +161,6 @@ int main(void)
         goto exit;
     }
 
-    mbedtls_ssl_conf_rng(&conf, mbedtls_ctr_drbg_random, &ctr_drbg);
     mbedtls_ssl_conf_dbg(&conf, my_debug, stdout);
 
 #if defined(MBEDTLS_SSL_CACHE_C)
@@ -315,16 +292,19 @@ reset:
     mbedtls_printf(" %d bytes written\n\n%s\n", len, (char *) buf);
 
     mbedtls_printf("  . Closing the connection...");
+    fflush(stdout);
 
     while ((ret = mbedtls_ssl_close_notify(&ssl)) < 0) {
         if (ret != MBEDTLS_ERR_SSL_WANT_READ &&
-            ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            ret != MBEDTLS_ERR_SSL_WANT_WRITE &&
+            ret != MBEDTLS_ERR_NET_CONN_RESET) {
             mbedtls_printf(" failed\n  ! mbedtls_ssl_close_notify returned %d\n\n", ret);
             goto reset;
         }
     }
 
     mbedtls_printf(" ok\n");
+    fflush(stdout);
 
     ret = 0;
     goto reset;
@@ -348,15 +328,9 @@ exit:
 #if defined(MBEDTLS_SSL_CACHE_C)
     mbedtls_ssl_cache_free(&cache);
 #endif
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
     mbedtls_psa_crypto_free();
-#endif /* MBEDTLS_USE_PSA_CRYPTO */
 
     mbedtls_exit(ret);
 }
-#endif /* MBEDTLS_BIGNUM_C && MBEDTLS_ENTROPY_C &&
-          MBEDTLS_SSL_TLS_C && MBEDTLS_SSL_SRV_C && MBEDTLS_NET_C &&
-          MBEDTLS_RSA_C && MBEDTLS_CTR_DRBG_C && MBEDTLS_X509_CRT_PARSE_C
-          && MBEDTLS_FS_IO && MBEDTLS_PEM_PARSE_C */
+
+#endif /* configuration allows running this program */

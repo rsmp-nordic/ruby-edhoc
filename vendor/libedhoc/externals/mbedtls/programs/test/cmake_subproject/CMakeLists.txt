@@ -14,10 +14,10 @@ add_subdirectory(${MBEDTLS_DIR} build)
 # Link against all the Mbed TLS libraries. Verifies that the targets have been
 # created using the specified prefix
 set(libs
-    subproject_test_mbedcrypto
-    subproject_test_mbedx509
     subproject_test_mbedtls
+    subproject_test_mbedx509
+    subproject_test_tfpsacrypto
 )
 
 add_executable(cmake_subproject cmake_subproject.c)
-target_link_libraries(cmake_subproject ${libs})
+target_link_libraries(cmake_subproject ${libs} ${CMAKE_THREAD_LIBS_INIT})

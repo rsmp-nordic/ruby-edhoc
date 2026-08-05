@@ -39,6 +39,11 @@ module Edhoc
     end
 
     def export_prk(label, length) = @native.export_prk(Integer(label), Integer(length))
+
+    def export_prk_with_context(label, context, length)
+      @native.export_prk_with_context(Integer(label), String(context).b, Integer(length))
+    end
+
     def matched_peer_id = @native.matched_peer_id
     def close = @native.close
 

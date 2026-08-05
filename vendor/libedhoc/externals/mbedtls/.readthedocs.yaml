@@ -5,14 +5,21 @@
 # Required
 version: 2
 
+# Include all submodules in the build
+submodules:
+  include: all
+  recursive: true
+
 # Set the version of Python and other tools you might need
 build:
   os: ubuntu-20.04
+  apt_packages:
+    - cmake
   tools:
     python: "3.9"
   jobs:
     pre_build:
-    - ./scripts/apidoc_full.sh
+    - ./framework/scripts/apidoc_full.sh
     - breathe-apidoc -o docs/api apidoc/xml
     post_build:
     - |
