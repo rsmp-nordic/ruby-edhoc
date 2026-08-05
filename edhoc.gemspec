@@ -25,6 +25,7 @@ Gem::Specification.new do |spec|
     'LICENSE.txt',
     'lib/**/*.rb',
     'ext/**/*.{c,h,rb}',
+    'ext/edhoc_native/cmake/CMakeLists.txt',
     'vendor/libedhoc/**/*',
     'vendor/libedhoc/.gitmodules'
   ]

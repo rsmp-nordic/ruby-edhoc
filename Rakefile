@@ -69,7 +69,7 @@ module VendorLibedhoc
     run!('git', 'clone', '--no-checkout', '--filter=blob:none', REMOTE_URL, checkout)
     fetch_ref!(checkout, ref)
     run!('git', '-C', checkout, 'checkout', '--detach', 'FETCH_HEAD')
-    run!('git', '-C', checkout, 'submodule', 'update', '--init', '--depth', '1', '--jobs', '4',
+    run!('git', '-C', checkout, 'submodule', 'update', '--init', '--recursive', '--depth', '1', '--jobs', '4',
          *REQUIRED_EXTERNALS)
 
     checkout

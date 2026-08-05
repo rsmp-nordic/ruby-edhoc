@@ -5,6 +5,17 @@
  *  SPDX-License-Identifier: Apache-2.0 OR GPL-2.0-or-later
  */
 
+/* Tell MSVC that we're ok with using classic C functions even
+ * when an `_s` variant exist. For most functions, the improvements
+ * of the `_s` variants are of limited usefulness and not worth
+ * the portability headaches.
+ */
+#if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_DEPRECATE)
+#define _CRT_SECURE_NO_DEPRECATE 1
+#endif
+
+#define MBEDTLS_DECLARE_PRIVATE_IDENTIFIERS
+
 #include "mbedtls/build_info.h"
 
 #include "mbedtls/platform.h"
@@ -12,22 +23,19 @@
 #include "mbedtls/md.h"
 
 #if !defined(MBEDTLS_X509_CSR_WRITE_C) || !defined(MBEDTLS_X509_CRT_PARSE_C) || \
-    !defined(MBEDTLS_PK_PARSE_C) || !defined(MBEDTLS_MD_CAN_SHA256) || \
-    !defined(MBEDTLS_ENTROPY_C) || !defined(MBEDTLS_CTR_DRBG_C) || \
-    !defined(MBEDTLS_PEM_WRITE_C) || !defined(MBEDTLS_FS_IO)
+    !defined(MBEDTLS_PK_PARSE_C) || !defined(PSA_WANT_ALG_SHA_256) || \
+    !defined(MBEDTLS_PEM_WRITE_C) || !defined(MBEDTLS_FS_IO) || \
+    !defined(MBEDTLS_MD_C)
 int main(void)
 {
     mbedtls_printf("MBEDTLS_X509_CSR_WRITE_C and/or MBEDTLS_FS_IO and/or "
-                   "MBEDTLS_PK_PARSE_C and/or MBEDTLS_MD_CAN_SHA256 and/or "
-                   "MBEDTLS_ENTROPY_C and/or MBEDTLS_CTR_DRBG_C "
+                   "MBEDTLS_PK_PARSE_C and/or PSA_WANT_ALG_SHA_256 "
                    "not defined.\n");
     mbedtls_exit(0);
 }
 #else
 
 #include "mbedtls/x509_csr.h"
-#include "mbedtls/entropy.h"
-#include "mbedtls/ctr_drbg.h"
 #include "mbedtls/error.h"
 
 #include <stdio.h>
@@ -93,22 +101,20 @@ int main(void)
  * global options
  */
 struct options {
-    const char *filename;             /* filename of the key file             */
-    const char *password;             /* password for the key file            */
-    int debug_level;                  /* level of debugging                   */
+    const char *filename;             /* filename of the key file                 */
+    const char *password;             /* password for the key file                */
+    int debug_level;                  /* level of debugging                       */
     const char *output_file;          /* where to store the constructed key file  */
-    const char *subject_name;         /* subject name for certificate request   */
-    mbedtls_x509_san_list *san_list;  /* subjectAltName for certificate request */
-    unsigned char key_usage;          /* key usage flags                      */
-    int force_key_usage;              /* Force adding the KeyUsage extension  */
-    unsigned char ns_cert_type;       /* NS cert type                         */
-    int force_ns_cert_type;           /* Force adding NsCertType extension    */
-    mbedtls_md_type_t md_alg;         /* Hash algorithm used for signature.   */
+    const char *subject_name;         /* subject name for certificate request     */
+    mbedtls_x509_san_list *san_list;  /* subjectAltName for certificate request   */
+    unsigned char key_usage;          /* key usage flags                          */
+    int force_key_usage;              /* Force adding the KeyUsage extension      */
+    unsigned char ns_cert_type;       /* NS cert type                             */
+    int force_ns_cert_type;           /* Force adding NsCertType extension        */
+    mbedtls_md_type_t md_alg;         /* Hash algorithm used for signature.       */
 } opt;
 
-int write_certificate_request(mbedtls_x509write_csr *req, const char *output_file,
-                              int (*f_rng)(void *, unsigned char *, size_t),
-                              void *p_rng)
+static int write_certificate_request(mbedtls_x509write_csr *req, const char *output_file)
 {
     int ret;
     FILE *f;
@@ -116,7 +122,7 @@ int write_certificate_request(mbedtls_x509write_csr *req, const char *output_fil
     size_t len = 0;
 
     memset(output_buf, 0, 4096);
-    if ((ret = mbedtls_x509write_csr_pem(req, output_buf, 4096, f_rng, p_rng)) < 0) {
+    if ((ret = mbedtls_x509write_csr_pem(req, output_buf, 4096)) < 0) {
         return ret;
     }
 
@@ -145,11 +151,7 @@ int main(int argc, char *argv[])
     int i;
     char *p, *q, *r;
     mbedtls_x509write_csr req;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
-    const char *pers = "csr example app";
     mbedtls_x509_san_list *cur, *prev;
-    mbedtls_asn1_named_data *ext_san_dirname = NULL;
 #if defined(MBEDTLS_X509_CRT_PARSE_C)
     uint8_t ip[4] = { 0 };
 #endif
@@ -158,18 +160,14 @@ int main(int argc, char *argv[])
      */
     mbedtls_x509write_csr_init(&req);
     mbedtls_pk_init(&key);
-    mbedtls_ctr_drbg_init(&ctr_drbg);
     memset(buf, 0, sizeof(buf));
-    mbedtls_entropy_init(&entropy);
 
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
     psa_status_t status = psa_crypto_init();
     if (status != PSA_SUCCESS) {
         mbedtls_fprintf(stderr, "Failed to initialize PSA Crypto implementation: %d\n",
                         (int) status);
         goto exit;
     }
-#endif /* MBEDTLS_USE_PSA_CRYPTO */
 
     if (argc < 2) {
 usage:
@@ -249,6 +247,10 @@ usage:
 
                 if ((subtype_value = strchr(q, ':')) != NULL) {
                     *subtype_value++ = '\0';
+                } else {
+                    mbedtls_printf(
+                        "Invalid argument for option SAN: Entry must be of the form TYPE:value\n");
+                    goto usage;
                 }
                 if (strcmp(q, "RFC822") == 0) {
                     cur->node.type = MBEDTLS_X509_SAN_RFC822_NAME;
@@ -257,10 +259,10 @@ usage:
                 } else if (strcmp(q, "DNS") == 0) {
                     cur->node.type = MBEDTLS_X509_SAN_DNS_NAME;
                 } else if (strcmp(q, "IP") == 0) {
-                    size_t ip_len = 0;
+                    size_t ip_addr_len = 0;
                     cur->node.type = MBEDTLS_X509_SAN_IP_ADDRESS;
-                    ip_len = mbedtls_x509_crt_parse_cn_inet_pton(subtype_value, ip);
-                    if (ip_len == 0) {
+                    ip_addr_len = mbedtls_x509_crt_parse_cn_inet_pton(subtype_value, ip);
+                    if (ip_addr_len == 0) {
                         mbedtls_printf("mbedtls_x509_crt_parse_cn_inet_pton failed to parse %s\n",
                                        subtype_value);
                         goto exit;
@@ -269,7 +271,15 @@ usage:
                     cur->node.san.unstructured_name.len = sizeof(ip);
                 } else if (strcmp(q, "DN") == 0) {
                     cur->node.type = MBEDTLS_X509_SAN_DIRECTORY_NAME;
-                    if ((ret = mbedtls_x509_string_to_names(&ext_san_dirname,
+                    /* Work around an API mismatch between string_to_names() and
+                     * mbedtls_x509_subject_alternative_name, which holds an
+                     * actual mbedtls_x509_name while a pointer to one would be
+                     * more convenient here. (Note mbedtls_x509_name and
+                     * mbedtls_asn1_named_data are synonymous, again
+                     * string_to_names() uses one while
+                     * cur->node.san.directory_name is nominally the other.) */
+                    mbedtls_asn1_named_data *tmp_san_dirname = NULL;
+                    if ((ret = mbedtls_x509_string_to_names(&tmp_san_dirname,
                                                             subtype_value)) != 0) {
                         mbedtls_strerror(ret, buf, sizeof(buf));
                         mbedtls_printf(
@@ -278,7 +288,9 @@ usage:
                             (unsigned int) -ret, buf);
                         goto exit;
                     }
-                    cur->node.san.directory_name = *ext_san_dirname;
+                    cur->node.san.directory_name = *tmp_san_dirname;
+                    mbedtls_free(tmp_san_dirname);
+                    tmp_san_dirname = NULL;
                 } else {
                     mbedtls_free(cur);
                     goto usage;
@@ -419,13 +431,6 @@ usage:
     mbedtls_printf("  . Seeding the random number generator...");
     fflush(stdout);
 
-    if ((ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                                     (const unsigned char *) pers,
-                                     strlen(pers))) != 0) {
-        mbedtls_printf(" failed\n  !  mbedtls_ctr_drbg_seed returned %d", ret);
-        goto exit;
-    }
-
     mbedtls_printf(" ok\n");
 
     /*
@@ -447,8 +452,7 @@ usage:
     mbedtls_printf("  . Loading the private key ...");
     fflush(stdout);
 
-    ret = mbedtls_pk_parse_keyfile(&key, opt.filename, opt.password,
-                                   mbedtls_ctr_drbg_random, &ctr_drbg);
+    ret = mbedtls_pk_parse_keyfile(&key, opt.filename, opt.password);
 
     if (ret != 0) {
         mbedtls_printf(" failed\n  !  mbedtls_pk_parse_keyfile returned %d", ret);
@@ -465,8 +469,7 @@ usage:
     mbedtls_printf("  . Writing the certificate request ...");
     fflush(stdout);
 
-    if ((ret = write_certificate_request(&req, opt.output_file,
-                                         mbedtls_ctr_drbg_random, &ctr_drbg)) != 0) {
+    if ((ret = write_certificate_request(&req, opt.output_file)) != 0) {
         mbedtls_printf(" failed\n  !  write_certificate_request %d", ret);
         goto exit;
     }
@@ -487,23 +490,27 @@ exit:
     }
 
     mbedtls_x509write_csr_free(&req);
-    mbedtls_asn1_free_named_data_list(&ext_san_dirname);
     mbedtls_pk_free(&key);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
-    mbedtls_entropy_free(&entropy);
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
     mbedtls_psa_crypto_free();
-#endif /* MBEDTLS_USE_PSA_CRYPTO */
 
     cur = opt.san_list;
     while (cur != NULL) {
-        prev = cur;
-        cur = cur->next;
-        mbedtls_free(prev);
+        mbedtls_x509_san_list *next = cur->next;
+        /* Note: mbedtls_x509_free_subject_alt_name() is not what we want here.
+         * It's the right thing for entries that were parsed from a certificate,
+         * where pointers are to the raw certificate, but here all the
+         * pointers were allocated while parsing from a user-provided string. */
+        if (cur->node.type == MBEDTLS_X509_SAN_DIRECTORY_NAME) {
+            mbedtls_x509_name *dn = &cur->node.san.directory_name;
+            mbedtls_free(dn->oid.p);
+            mbedtls_free(dn->val.p);
+            mbedtls_asn1_free_named_data_list(&dn->next);
+        }
+        mbedtls_free(cur);
+        cur = next;
     }
-
 
     mbedtls_exit(exit_code);
 }
 #endif /* MBEDTLS_X509_CSR_WRITE_C && MBEDTLS_PK_PARSE_C && MBEDTLS_FS_IO &&
-          MBEDTLS_ENTROPY_C && MBEDTLS_CTR_DRBG_C && MBEDTLS_PEM_WRITE_C */
+          MBEDTLS_PEM_WRITE_C */

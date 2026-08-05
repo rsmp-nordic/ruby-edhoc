@@ -12,7 +12,7 @@ from pathlib import Path
 project = "libedhoc"
 copyright = "2026, Kamil Kielbasa"
 author = "Kamil Kielbasa"
-version = "v1.15.0"
+version = "2.0.1"
 release = version
 
 # -- General configuration ---------------------------------------------------
@@ -35,6 +35,7 @@ exclude_patterns = ["build", "_build", "Thumbs.db", ".DS_Store"]
 # -- Options for HTML output -------------------------------------------------
 
 html_theme = "furo"
+html_title = f"{project} v{release}"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 

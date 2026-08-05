@@ -14,7 +14,7 @@ The current public API exposes two EDHOC method 0 profiles:
 | `Edhoc::Suite0Session` | 0 | X25519 | Ed25519 / EdDSA | AES-CCM-16-64-128 |
 | `Edhoc::Suite4Session` | 4 | X25519 | Ed25519 / EdDSA | ChaCha20-Poly1305 |
 
-Both profiles currently use X.509-chain credential transport through libedhoc.
+Both profiles support X.509-chain credentials and raw KIDs referring to CBOR-encoded credentials.
 
 ## Installation
 
@@ -30,6 +30,13 @@ The native extension requires:
 - Ruby development headers
 - CMake
 - a C compiler
+- Python 3 with the TF-PSA driver-generator requirements
+
+Install the Python build requirements with:
+
+```sh
+python3 -m pip install -r vendor/libedhoc/externals/mbedtls/tf-psa-crypto/scripts/driver.requirements.txt
+```
 
 On `mingw-ucrt` Ruby, the build selects CMake's MSYS Makefiles generator and
 GCC so that libedhoc and the Ruby extension use the same RubyInstaller/MSYS2
@@ -77,8 +84,12 @@ initiator.process_message2(message2)
 message3 = initiator.compose_message3
 responder.process_message3(message3)
 
-secret = initiator.export_prk(0, 32)
+context = deterministic_cbor_application_context
+secret = initiator.export_prk_with_context(32_768, context, 32)
 ```
+
+`export_prk_with_context(label, context, length)` exposes the complete RFC 9528
+`EDHOC_Exporter` input. `export_prk(label, length)` exports with an empty context.
 
 Always close sessions when done:
 
@@ -139,7 +150,7 @@ The Ruby wrapper is MIT licensed. The vendored `libedhoc` project is also MIT li
 ## Updating Vendored libedhoc
 
 The vendored C library is refreshed with a rake task. It checks out upstream `libedhoc` in a temporary
-directory, initializes the submodules required by this gem, copies the resulting tree into
+directory, recursively initializes the submodules required by this gem, copies the resulting tree into
 `vendor/libedhoc`, and writes the exact commits to `vendor/libedhoc/ruby-edhoc-vendor.yml`.
 
 Update from the ref recorded in `vendor/libedhoc/ruby-edhoc-vendor.yml`:
@@ -153,7 +164,7 @@ If the metadata file does not exist yet, this falls back to `main`.
 Update from another branch, tag, or commit:
 
 ```sh
-bundle exec rake 'vendor:update[main]'
+bundle exec rake 'vendor:update[v2.0.1]'
 ```
 
 The task refuses to run with uncommitted changes present. Review and commit the resulting

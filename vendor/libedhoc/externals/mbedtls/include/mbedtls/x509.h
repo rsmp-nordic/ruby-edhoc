@@ -16,10 +16,6 @@
 #include "mbedtls/asn1.h"
 #include "mbedtls/pk.h"
 
-#if defined(MBEDTLS_RSA_C)
-#include "mbedtls/rsa.h"
-#endif
-
 /**
  * \addtogroup x509_module
  * \{
@@ -74,11 +70,11 @@
 /** Input invalid. */
 #define MBEDTLS_ERR_X509_BAD_INPUT_DATA                   -0x2800
 /** Allocation of memory failed. */
-#define MBEDTLS_ERR_X509_ALLOC_FAILED                     -0x2880
+#define MBEDTLS_ERR_X509_ALLOC_FAILED                     PSA_ERROR_INSUFFICIENT_MEMORY
 /** Read/write of file failed. */
 #define MBEDTLS_ERR_X509_FILE_IO_ERROR                    -0x2900
 /** Destination buffer is too small. */
-#define MBEDTLS_ERR_X509_BUFFER_TOO_SMALL                 -0x2980
+#define MBEDTLS_ERR_X509_BUFFER_TOO_SMALL                 PSA_ERROR_BUFFER_TOO_SMALL
 /** A fatal error occurred, eg the chain is too long or the vrfy callback failed. */
 #define MBEDTLS_ERR_X509_FATAL_ERROR                      -0x3000
 /** \} name X509 Error codes */
@@ -167,26 +163,23 @@
  *
  * Comments refer to the status for using certificates. Status can be
  * different for writing certificates or reading CRLs or CSRs.
- *
- * Those are defined in oid.h as oid.c needs them in a data structure. Since
- * these were previously defined here, let's have aliases for compatibility.
  */
-#define MBEDTLS_X509_EXT_AUTHORITY_KEY_IDENTIFIER MBEDTLS_OID_X509_EXT_AUTHORITY_KEY_IDENTIFIER
-#define MBEDTLS_X509_EXT_SUBJECT_KEY_IDENTIFIER   MBEDTLS_OID_X509_EXT_SUBJECT_KEY_IDENTIFIER
-#define MBEDTLS_X509_EXT_KEY_USAGE                MBEDTLS_OID_X509_EXT_KEY_USAGE
-#define MBEDTLS_X509_EXT_CERTIFICATE_POLICIES     MBEDTLS_OID_X509_EXT_CERTIFICATE_POLICIES
-#define MBEDTLS_X509_EXT_POLICY_MAPPINGS          MBEDTLS_OID_X509_EXT_POLICY_MAPPINGS
-#define MBEDTLS_X509_EXT_SUBJECT_ALT_NAME         MBEDTLS_OID_X509_EXT_SUBJECT_ALT_NAME         /* Supported (DNS) */
-#define MBEDTLS_X509_EXT_ISSUER_ALT_NAME          MBEDTLS_OID_X509_EXT_ISSUER_ALT_NAME
-#define MBEDTLS_X509_EXT_SUBJECT_DIRECTORY_ATTRS  MBEDTLS_OID_X509_EXT_SUBJECT_DIRECTORY_ATTRS
-#define MBEDTLS_X509_EXT_BASIC_CONSTRAINTS        MBEDTLS_OID_X509_EXT_BASIC_CONSTRAINTS        /* Supported */
-#define MBEDTLS_X509_EXT_NAME_CONSTRAINTS         MBEDTLS_OID_X509_EXT_NAME_CONSTRAINTS
-#define MBEDTLS_X509_EXT_POLICY_CONSTRAINTS       MBEDTLS_OID_X509_EXT_POLICY_CONSTRAINTS
-#define MBEDTLS_X509_EXT_EXTENDED_KEY_USAGE       MBEDTLS_OID_X509_EXT_EXTENDED_KEY_USAGE
-#define MBEDTLS_X509_EXT_CRL_DISTRIBUTION_POINTS  MBEDTLS_OID_X509_EXT_CRL_DISTRIBUTION_POINTS
-#define MBEDTLS_X509_EXT_INIHIBIT_ANYPOLICY       MBEDTLS_OID_X509_EXT_INIHIBIT_ANYPOLICY
-#define MBEDTLS_X509_EXT_FRESHEST_CRL             MBEDTLS_OID_X509_EXT_FRESHEST_CRL
-#define MBEDTLS_X509_EXT_NS_CERT_TYPE             MBEDTLS_OID_X509_EXT_NS_CERT_TYPE
+#define MBEDTLS_X509_EXT_AUTHORITY_KEY_IDENTIFIER (1 << 0)
+#define MBEDTLS_X509_EXT_SUBJECT_KEY_IDENTIFIER   (1 << 1)
+#define MBEDTLS_X509_EXT_KEY_USAGE                (1 << 2)
+#define MBEDTLS_X509_EXT_CERTIFICATE_POLICIES     (1 << 3)
+#define MBEDTLS_X509_EXT_POLICY_MAPPINGS          (1 << 4)
+#define MBEDTLS_X509_EXT_SUBJECT_ALT_NAME         (1 << 5)  /* Supported (DNS) */
+#define MBEDTLS_X509_EXT_ISSUER_ALT_NAME          (1 << 6)
+#define MBEDTLS_X509_EXT_SUBJECT_DIRECTORY_ATTRS  (1 << 7)
+#define MBEDTLS_X509_EXT_BASIC_CONSTRAINTS        (1 << 8)  /* Supported */
+#define MBEDTLS_X509_EXT_NAME_CONSTRAINTS         (1 << 9)
+#define MBEDTLS_X509_EXT_POLICY_CONSTRAINTS       (1 << 10)
+#define MBEDTLS_X509_EXT_EXTENDED_KEY_USAGE       (1 << 11)
+#define MBEDTLS_X509_EXT_CRL_DISTRIBUTION_POINTS  (1 << 12)
+#define MBEDTLS_X509_EXT_INIHIBIT_ANYPOLICY       (1 << 13)
+#define MBEDTLS_X509_EXT_FRESHEST_CRL             (1 << 14)
+#define MBEDTLS_X509_EXT_NS_CERT_TYPE             (1 << 16)
 
 /*
  * Storage format identifiers
@@ -307,6 +300,7 @@ typedef struct mbedtls_x509_san_list {
 mbedtls_x509_san_list;
 
 /** \} name Structures for parsing X.509 certificates, CRLs and CSRs */
+/** \} addtogroup x509_module */
 
 /**
  * \brief          Store the certificate DN in printable form into buf;
@@ -320,6 +314,34 @@ mbedtls_x509_san_list;
  *                 terminated nul byte), or a negative error code.
  */
 int mbedtls_x509_dn_gets(char *buf, size_t size, const mbedtls_x509_name *dn);
+
+
+/**
+ * \brief            Return the key's type as a string.
+ *
+ * \param[in] pk     A mbedtls_pk_context struct containing the pk_key_type to
+                     convert
+ * \return           Returns a string describing the key type.
+ */
+const char *mbedtls_x509_pk_type_as_string(const mbedtls_pk_context *pk);
+
+/**
+ * \brief            Convert the certificate DN string \p name into
+ *                   a linked list of mbedtls_x509_name (equivalent to
+ *                   mbedtls_asn1_named_data).
+ *
+ * \note             This function allocates a linked list, and places the head
+ *                   pointer in \p head. This list must later be freed by a
+ *                   call to mbedtls_asn1_free_named_data_list().
+ *
+ * \param[out] head  Address in which to store the pointer to the head of the
+ *                   allocated list of mbedtls_x509_name. Must point to NULL on
+ *                   entry.
+ * \param[in] name   The string representation of a DN to convert
+ *
+ * \return           0 on success, or a negative error code.
+ */
+int mbedtls_x509_string_to_names(mbedtls_asn1_named_data **head, const char *name);
 
 /**
  * \brief          Return the next relative DN in an X509 name.
@@ -448,75 +470,6 @@ int mbedtls_x509_parse_subject_alt_name(const mbedtls_x509_buf *san_buf,
  */
 void mbedtls_x509_free_subject_alt_name(mbedtls_x509_subject_alternative_name *san);
 
-/** \} addtogroup x509_module */
-
-/*
- * Internal module functions. You probably do not want to use these unless you
- * know you do.
- */
-int mbedtls_x509_get_name(unsigned char **p, const unsigned char *end,
-                          mbedtls_x509_name *cur);
-int mbedtls_x509_get_alg_null(unsigned char **p, const unsigned char *end,
-                              mbedtls_x509_buf *alg);
-int mbedtls_x509_get_alg(unsigned char **p, const unsigned char *end,
-                         mbedtls_x509_buf *alg, mbedtls_x509_buf *params);
-#if defined(MBEDTLS_X509_RSASSA_PSS_SUPPORT)
-int mbedtls_x509_get_rsassa_pss_params(const mbedtls_x509_buf *params,
-                                       mbedtls_md_type_t *md_alg, mbedtls_md_type_t *mgf_md,
-                                       int *salt_len);
-#endif
-int mbedtls_x509_get_sig(unsigned char **p, const unsigned char *end, mbedtls_x509_buf *sig);
-int mbedtls_x509_get_sig_alg(const mbedtls_x509_buf *sig_oid, const mbedtls_x509_buf *sig_params,
-                             mbedtls_md_type_t *md_alg, mbedtls_pk_type_t *pk_alg,
-                             void **sig_opts);
-int mbedtls_x509_get_time(unsigned char **p, const unsigned char *end,
-                          mbedtls_x509_time *t);
-int mbedtls_x509_get_serial(unsigned char **p, const unsigned char *end,
-                            mbedtls_x509_buf *serial);
-int mbedtls_x509_get_ext(unsigned char **p, const unsigned char *end,
-                         mbedtls_x509_buf *ext, int tag);
-#if !defined(MBEDTLS_X509_REMOVE_INFO)
-int mbedtls_x509_sig_alg_gets(char *buf, size_t size, const mbedtls_x509_buf *sig_oid,
-                              mbedtls_pk_type_t pk_alg, mbedtls_md_type_t md_alg,
-                              const void *sig_opts);
-#endif
-int mbedtls_x509_key_size_helper(char *buf, size_t buf_size, const char *name);
-int mbedtls_x509_string_to_names(mbedtls_asn1_named_data **head, const char *name);
-int mbedtls_x509_set_extension(mbedtls_asn1_named_data **head, const char *oid, size_t oid_len,
-                               int critical, const unsigned char *val,
-                               size_t val_len);
-int mbedtls_x509_write_extensions(unsigned char **p, unsigned char *start,
-                                  mbedtls_asn1_named_data *first);
-int mbedtls_x509_write_names(unsigned char **p, unsigned char *start,
-                             mbedtls_asn1_named_data *first);
-int mbedtls_x509_write_sig(unsigned char **p, unsigned char *start,
-                           const char *oid, size_t oid_len,
-                           unsigned char *sig, size_t size,
-                           mbedtls_pk_type_t pk_alg);
-int mbedtls_x509_get_ns_cert_type(unsigned char **p,
-                                  const unsigned char *end,
-                                  unsigned char *ns_cert_type);
-int mbedtls_x509_get_key_usage(unsigned char **p,
-                               const unsigned char *end,
-                               unsigned int *key_usage);
-int mbedtls_x509_get_subject_alt_name(unsigned char **p,
-                                      const unsigned char *end,
-                                      mbedtls_x509_sequence *subject_alt_name);
-int mbedtls_x509_get_subject_alt_name_ext(unsigned char **p,
-                                          const unsigned char *end,
-                                          mbedtls_x509_sequence *subject_alt_name);
-int mbedtls_x509_info_subject_alt_name(char **buf, size_t *size,
-                                       const mbedtls_x509_sequence
-                                       *subject_alt_name,
-                                       const char *prefix);
-int mbedtls_x509_info_cert_type(char **buf, size_t *size,
-                                unsigned char ns_cert_type);
-int mbedtls_x509_info_key_usage(char **buf, size_t *size,
-                                unsigned int key_usage);
-
-int mbedtls_x509_write_set_san_common(mbedtls_asn1_named_data **extensions,
-                                      const mbedtls_x509_san_list *san_list);
-
 /**
  * \brief          This function parses a CN string as an IP address.
  *
@@ -547,4 +500,4 @@ size_t mbedtls_x509_crt_parse_cn_inet_pton(const char *cn, void *dst);
 }
 #endif
 
-#endif /* x509.h */
+#endif /* MBEDTLS_X509_H */

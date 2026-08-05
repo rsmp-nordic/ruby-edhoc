@@ -110,6 +110,14 @@ describe Edhoc do
     expect(responder.process_message3(message3)).to be == true
   end
 
+  it 'reports the libedhoc v2 API version' do
+    expect(Edhoc::Native.library_version).to be == {
+      libedhoc_api_major: 2,
+      libedhoc_api_minor: 0,
+      libedhoc_api_patch: 0
+    }
+  end
+
   it 'exposes native profile metadata for the secure RSMP candidate' do
     profile = Edhoc::Native.suite0_profile
 
@@ -135,7 +143,7 @@ describe Edhoc do
   end
 
   it 'runs a suite 0 initiator/responder handshake' do
-    vector = Edhoc::Native.suite0_test_vector
+    vector = Edhoc::TestVector.suite0
     initiator, responder = suite0_sessions(vector)
     run_suite0_handshake(initiator, responder)
 
@@ -150,7 +158,7 @@ describe Edhoc do
   end
 
   it 'runs a suite 4 initiator/responder handshake' do
-    vector = Edhoc::Native.suite0_test_vector
+    vector = Edhoc::TestVector.suite0
     initiator, responder = suite4_sessions(vector)
     run_suite0_handshake(initiator, responder)
 
@@ -164,8 +172,26 @@ describe Edhoc do
     responder&.close
   end
 
+  it 'exports matching context-bound keying material' do
+    vector = Edhoc::TestVector.suite0
+    initiator, responder = suite4_sessions(vector)
+    run_suite0_handshake(initiator, responder)
+    context = 'rsmp-secure-v1 context'.b
+
+    initiator_secret = initiator.export_prk_with_context(32_768, context, 32)
+    responder_secret = responder.export_prk_with_context(32_768, context, 32)
+
+    expect(initiator_secret).to be == responder_secret
+    expect(initiator_secret.bytesize).to be == 32
+    expect(initiator_secret).not.to be == initiator.export_prk_with_context(32_768, 'other context'.b, 32)
+    expect(initiator.export_prk_with_context(32_768, ''.b, 32)).to be == initiator.export_prk(32_768, 32)
+  ensure
+    initiator&.close
+    responder&.close
+  end
+
   it 'runs a suite 4 handshake with kid-identified CBOR credentials' do
-    vector = Edhoc::Native.suite0_test_vector
+    vector = Edhoc::TestVector.suite0
     initiator, responder = kid_cbor_suite4_sessions(vector)
     run_suite0_handshake(initiator, responder)
 
@@ -181,7 +207,7 @@ describe Edhoc do
   end
 
   it 'matches a known peer from a responder peer set' do
-    vector = Edhoc::Native.suite0_test_vector
+    vector = Edhoc::TestVector.suite0
     initiator = Edhoc::Suite0Session.new(
       role: :initiator,
       private_key: vector.fetch(:initiator_private_key),
@@ -216,7 +242,7 @@ describe Edhoc do
   end
 
   it 'rejects unknown peers in a responder peer set' do
-    vector = Edhoc::Native.suite0_test_vector
+    vector = Edhoc::TestVector.suite0
     initiator = Edhoc::Suite0Session.new(
       role: :initiator,
       private_key: vector.fetch(:initiator_private_key),
@@ -249,7 +275,7 @@ describe Edhoc do
   end
 
   it 'names an untrusted x509 credential by common name' do
-    vector = Edhoc::Native.suite0_test_vector
+    vector = Edhoc::TestVector.suite0
     site = generated_identity('RN+SI0002')
     initiator = Edhoc::Suite0Session.new(
       role: :initiator,
@@ -283,7 +309,7 @@ describe Edhoc do
   end
 
   it 'raises typed Ruby exceptions for native libedhoc failures' do
-    vector = Edhoc::Native.suite0_test_vector
+    vector = Edhoc::TestVector.suite0
     initiator, = suite0_sessions(vector)
 
     expect(Edhoc::NativeError < Edhoc::Error).to be == true
@@ -300,5 +326,40 @@ describe Edhoc do
     expect(error.message).to be(:include?, 'bad_state (-104)')
   ensure
     initiator&.close
+  end
+
+  it 'rejects malformed message 1 input without entering the handshake' do
+    vector = Edhoc::TestVector.suite0
+    _, responder = suite4_sessions(vector)
+
+    expect do
+      responder.process_message1("\xFF".b)
+    end.to raise_exception(Edhoc::CborError)
+  ensure
+    responder&.close
+  end
+
+  it 'rejects message 3 ciphertext shorter than the authentication tag' do
+    vector = Edhoc::TestVector.suite0
+    initiator, responder = suite4_sessions(vector)
+    responder.process_message1(initiator.compose_message1)
+    initiator.process_message2(responder.compose_message2)
+
+    expect do
+      responder.process_message3("\x40".b)
+    end.to raise_exception(Edhoc::MessageError)
+  ensure
+    initiator&.close
+    responder&.close
+  end
+
+  it 'releases imported PSA authentication keys when sessions close' do
+    vector = Edhoc::TestVector.suite0
+
+    64.times do
+      initiator, responder = suite4_sessions(vector)
+      initiator.close
+      responder.close
+    end
   end
 end

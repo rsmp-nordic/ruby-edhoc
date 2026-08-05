@@ -15,7 +15,7 @@
  *  http://www.itu.int/ITU-T/studygroups/com17/languages/X.690-0207.pdf
  */
 
-#include "common.h"
+#include "x509_internal.h"
 
 #if defined(MBEDTLS_X509_CRL_PARSE_C)
 
@@ -367,7 +367,7 @@ int mbedtls_x509_crl_parse_der(mbedtls_x509_crl *chain,
     }
 
     end = p + len;
-    crl->tbs.len = end - crl->tbs.p;
+    crl->tbs.len = (size_t) (end - crl->tbs.p);
 
     /*
      * Version  ::=  INTEGER  OPTIONAL {  v1(0), v2(1)  }
@@ -389,8 +389,7 @@ int mbedtls_x509_crl_parse_der(mbedtls_x509_crl *chain,
     crl->version++;
 
     if ((ret = mbedtls_x509_get_sig_alg(&crl->sig_oid, &sig_params1,
-                                        &crl->sig_md, &crl->sig_pk,
-                                        &crl->sig_opts)) != 0) {
+                                        &crl->sig_md, &crl->sig_pk)) != 0) {
         mbedtls_x509_crl_free(crl);
         return MBEDTLS_ERR_X509_UNKNOWN_SIG_ALG;
     }
@@ -411,7 +410,7 @@ int mbedtls_x509_crl_parse_der(mbedtls_x509_crl *chain,
         return ret;
     }
 
-    crl->issuer_raw.len = p - crl->issuer_raw.p;
+    crl->issuer_raw.len = (size_t) (p - crl->issuer_raw.p);
 
     /*
      * thisUpdate          Time
@@ -583,11 +582,6 @@ int mbedtls_x509_crl_parse_file(mbedtls_x509_crl *chain, const char *path)
 
 #if !defined(MBEDTLS_X509_REMOVE_INFO)
 /*
- * Return an informational string about the certificate.
- */
-#define BEFORE_COLON    14
-#define BC              "14"
-/*
  * Return an informational string about the CRL.
  */
 int mbedtls_x509_crl_info(char *buf, size_t size, const char *prefix,
@@ -651,8 +645,7 @@ int mbedtls_x509_crl_info(char *buf, size_t size, const char *prefix,
     ret = mbedtls_snprintf(p, n, "\n%ssigned using  : ", prefix);
     MBEDTLS_X509_SAFE_SNPRINTF;
 
-    ret = mbedtls_x509_sig_alg_gets(p, n, &crl->sig_oid, crl->sig_pk, crl->sig_md,
-                                    crl->sig_opts);
+    ret = mbedtls_x509_sig_alg_gets(p, n, &crl->sig_oid, crl->sig_pk, crl->sig_md);
     MBEDTLS_X509_SAFE_SNPRINTF;
 
     ret = mbedtls_snprintf(p, n, "\n");
@@ -681,10 +674,6 @@ void mbedtls_x509_crl_free(mbedtls_x509_crl *crl)
     mbedtls_x509_crl_entry *entry_prv;
 
     while (crl_cur != NULL) {
-#if defined(MBEDTLS_X509_RSASSA_PSS_SUPPORT)
-        mbedtls_free(crl_cur->sig_opts);
-#endif
-
         mbedtls_asn1_free_named_data_list_shallow(crl_cur->issuer.next);
 
         entry_cur = crl_cur->entry.next;
