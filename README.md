@@ -18,11 +18,10 @@ Both profiles support X.509-chain credentials and raw KIDs referring to CBOR-enc
 
 ## Installation
 
-This gem is currently developed locally inside the RSMP workspace. Use it from another Gemfile with a
-path dependency:
+This gem us not published yet, but you can install it from Github:
 
 ```ruby
-gem 'edhoc', path: '../ruby-edhoc'
+gem 'edhoc', github: 'rsmp-nordic/ruby-edhoc'
 ```
 
 The native extension requires:
