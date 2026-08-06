@@ -28,6 +28,51 @@ end
 describe Edhoc::EAD do
   include SessionTestHelpers
 
+  it 'validates token bounds and the handler contract' do
+    expect { Edhoc::EAD::Token.new(label: 2**31) }.to raise_exception(RangeError)
+    expect { Edhoc::EAD::Bridge.new(Object.new) }.to raise_exception(ArgumentError)
+
+    handler = Class.new do
+      attr_accessor :result
+
+      def compose(_context) = @result
+      def process(_context, _tokens) = nil
+      def supports?(_label) = true
+    end.new
+    bridge = Edhoc::EAD::Bridge.new(handler)
+    context = {
+      role: :initiator, method: 0, cipher_suite: 0,
+      message: 1, authentication: nil
+    }
+    expect(bridge.__native_compose(context)).to be == []
+    handler.result = [Object.new]
+    expect { bridge.__native_compose(context) }.to raise_exception(TypeError)
+  end
+
+  it 'passes the absolute value of supported critical labels to the handler' do
+    handler = Class.new do
+      attr_reader :supported, :processed
+
+      def compose(_context) = []
+
+      def supports?(label)
+        @supported = label
+        true
+      end
+
+      def process(_context, tokens) = @processed = tokens
+    end.new
+    bridge = Edhoc::EAD::Bridge.new(handler)
+    context = {
+      role: :responder, method: 0, cipher_suite: 0,
+      message: 1, authentication: nil
+    }
+
+    expect(bridge.__native_process(context, [[-42, nil]])).to be_nil
+    expect(handler.supported).to be == 42
+    expect(handler.processed.first.label_only?).to be == true
+  end
+
   it 'preserves label-only, empty, and valued tokens in messages 1 through 4' do
     initiator_handler = TestEadHandler.new
     responder_handler = TestEadHandler.new

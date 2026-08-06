@@ -662,25 +662,24 @@ static struct ruby_edhoc_session *get_session(VALUE self)
 	return session;
 }
 
-static struct parsed_connection_id parse_connection_id(VALUE value)
+static void parse_connection_id(VALUE value, struct parsed_connection_id *parsed)
 {
-	struct parsed_connection_id parsed = { 0 };
+	memset(parsed, 0, sizeof(*parsed));
 	if (RB_INTEGER_TYPE_P(value)) {
 		long id = NUM2LONG(value);
 		if (id < -24 || id > 23)
 			rb_raise(rb_eArgError, "integer connection ID must be between -24 and 23");
-		parsed.bytes[0] = id >= 0 ? (uint8_t)id : (uint8_t)(0x20 | (-1 - id));
-		parsed.buffer.value = parsed.bytes;
-		parsed.buffer.length = 1;
-		return parsed;
+		parsed->bytes[0] = id >= 0 ? (uint8_t)id : (uint8_t)(0x20 | (-1 - id));
+		parsed->buffer.value = parsed->bytes;
+		parsed->buffer.length = 1;
+		return;
 	}
 	StringValue(value);
-	if ((size_t)RSTRING_LEN(value) > sizeof(parsed.bytes))
+	if ((size_t)RSTRING_LEN(value) > sizeof(parsed->bytes))
 		rb_raise(rb_eArgError, "connection ID is too long");
-	parsed.buffer.length = (size_t)RSTRING_LEN(value);
-	memcpy(parsed.bytes, RSTRING_PTR(value), parsed.buffer.length);
-	parsed.buffer.value = parsed.bytes;
-	return parsed;
+	parsed->buffer.length = (size_t)RSTRING_LEN(value);
+	memcpy(parsed->bytes, RSTRING_PTR(value), parsed->buffer.length);
+	parsed->buffer.value = parsed->bytes;
 }
 
 static enum edhoc_role parse_role(VALUE value)
@@ -742,7 +741,8 @@ static VALUE session_initialize(VALUE self, VALUE role_value, VALUE methods_valu
 	if (ret != EDHOC_SUCCESS)
 		raise_session_error(session, "edhoc_context_init", ret);
 	session->initialized = true;
-	struct parsed_connection_id connection_id = parse_connection_id(connection_id_value);
+	struct parsed_connection_id connection_id;
+	parse_connection_id(connection_id_value, &connection_id);
 	ret = edhoc_set_methods(session->context, session->methods, session->method_count);
 	if (ret == EDHOC_SUCCESS)
 		ret = edhoc_set_cipher_suites(session->context, session->suites, session->suite_count);
@@ -1248,7 +1248,8 @@ static VALUE native_coap_prepend_connection_id(VALUE module, VALUE message,
 {
 	(void)module;
 	StringValue(message);
-	struct parsed_connection_id connection_id = parse_connection_id(connection_id_value);
+	struct parsed_connection_id connection_id;
+	parse_connection_id(connection_id_value, &connection_id);
 	size_t capacity = (size_t)RSTRING_LEN(message) + connection_id.buffer.length + 9;
 	uint8_t *buffer = malloc(capacity);
 	if (buffer == NULL)
@@ -1289,8 +1290,10 @@ static VALUE native_coap_extract_connection_id(VALUE module, VALUE payload)
 static VALUE native_coap_connection_id_equal(VALUE module, VALUE left, VALUE right)
 {
 	(void)module;
-	struct parsed_connection_id first = parse_connection_id(left);
-	struct parsed_connection_id second = parse_connection_id(right);
+	struct parsed_connection_id first;
+	struct parsed_connection_id second;
+	parse_connection_id(left, &first);
+	parse_connection_id(right, &second);
 	return edhoc_coap_connection_id_equal(&first.buffer, &second.buffer) ? Qtrue : Qfalse;
 }
 

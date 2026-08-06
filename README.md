@@ -39,6 +39,8 @@ compiler. libedhoc and its required external projects are included under
 bundle install
 bundle exec rake compile
 bundle exec sus
+bundle exec rake coverage
+bundle exec rake native_coverage # Clang/LLVM, binding sources only
 bundle exec rubocop
 ```
 

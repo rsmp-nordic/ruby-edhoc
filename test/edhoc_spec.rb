@@ -32,6 +32,38 @@ describe Edhoc::Session do
     responder&.close
   end
 
+  it 'offers all methods in preference order and selects the first mutual method' do
+    initiator_identity = identity('initiator', 1)
+    responder_identity = identity('responder', 2)
+    common = { cipher_suites: [0], max_message_size: 65_536 }
+    initiator = Edhoc::Session.new(
+      **common,
+      role: :initiator,
+      methods: [3, 2, 1, 0],
+      connection_id: -14,
+      credentials: TestCredentialProvider.new(
+        identity: initiator_identity, peer: responder_identity
+      )
+    )
+    responder = Edhoc::Session.new(
+      **common,
+      role: :responder,
+      methods: [3, 2],
+      connection_id: "\x18".b,
+      credentials: TestCredentialProvider.new(
+        identity: responder_identity, peer: initiator_identity
+      )
+    )
+    handshake(initiator, responder)
+
+    expect(initiator.selected_method).to be == 3
+    expect(responder.selected_method).to be == 3
+    expect(initiator.methods).to be == [3, 2, 1, 0]
+  ensure
+    initiator&.close
+    responder&.close
+  end
+
   it 'composes a negotiation error, records peer suites, restarts, and retries' do
     initiator, responder = negotiating_sessions(
       method: 0, initiator_suites: [0, 4], responder_suites: [2, 24]
@@ -51,6 +83,7 @@ describe Edhoc::Session do
 
     parsed = initiator.process_error_message(responder.error_message.to_bytes)
     expect(parsed.code).to be == :wrong_selected_cipher_suite
+    expect(initiator.error_message.object_id).to be == parsed.object_id
     expect(initiator.diagnostics.peer_cipher_suites).to be == [2, 24]
 
     initiator.restart!(cipher_suites: [2])
@@ -95,6 +128,73 @@ describe Edhoc::Session do
       .to raise_exception(ArgumentError)
     expect { Edhoc::Suite0Session.new(**common, methods: [0], private_key: 'legacy') }
       .to raise_exception(ArgumentError)
+    expect { Edhoc::Session.new(**common, methods: [], cipher_suites: [0]) }
+      .to raise_exception(ArgumentError)
+    expect { Edhoc::Session.new(**common, methods: [0], cipher_suites: [0, 0]) }
+      .to raise_exception(ArgumentError)
+    expect { Edhoc::Session.new(**common, methods: [0], cipher_suites: [1]) }
+      .to raise_exception(ArgumentError)
+    expect { Edhoc::Session.new(**common, methods: [0], cipher_suites: [0], max_message_size: 0) }
+      .to raise_exception(ArgumentError)
+    expect do
+      Edhoc::Session.new(**common, role: :client, methods: [0], cipher_suites: [0])
+    end.to raise_exception(ArgumentError)
+  end
+
+  it 'enforces message-size bounds for composition and processing' do
+    initiator_identity = identity('initiator', 1)
+    responder_identity = identity('responder', 2)
+    initiator = Edhoc::Session.new(
+      role: :initiator, methods: [0], cipher_suites: [0], connection_id: -14,
+      credentials: TestCredentialProvider.new(identity: initiator_identity, peer: responder_identity),
+      max_message_size: 1
+    )
+    responder = Edhoc::Session.new(
+      role: :responder, methods: [0], cipher_suites: [0], connection_id: "\x18".b,
+      credentials: TestCredentialProvider.new(identity: responder_identity, peer: initiator_identity),
+      max_message_size: 1
+    )
+
+    expect { initiator.compose_message1 }.to raise_exception(Edhoc::CborError)
+    expect { responder.process_message1("\x01\x02".b) }.to raise_exception(ArgumentError)
+  ensure
+    initiator&.close
+    responder&.close
+  end
+
+  it 'provides both convenience suite presets and rejects attempts to override them' do
+    initiator_identity = identity('initiator', 1)
+    responder_identity = identity('responder', 2)
+    common = {
+      role: :initiator, methods: [0], connection_id: -14,
+      credentials: TestCredentialProvider.new(identity: initiator_identity, peer: responder_identity)
+    }
+    suite0 = Edhoc::Suite0Session.new(**common)
+    suite4 = Edhoc::Suite4Session.new(**common)
+
+    expect(suite0.cipher_suites).to be == [0]
+    expect(suite4.cipher_suites).to be == [4]
+    expect { Edhoc::Suite0Session.new(**common, cipher_suites: [2]) }.to raise_exception(ArgumentError)
+    expect { Edhoc::Suite4Session.new(**common, cipher_suites: [2]) }.to raise_exception(ArgumentError)
+  ensure
+    suite0&.close
+    suite4&.close
+  end
+
+  it 'maps unspecified and credential protocol errors to typed messages' do
+    native = Struct.new(:protocol_error_code, :error_text, :local_cipher_suites)
+    session = Edhoc::Session.allocate
+
+    session.instance_variable_set(:@native, native.new(1, nil, []))
+    unspecified = session.error_message
+    expect(unspecified.code).to be == :unspecified
+    expect(unspecified.text).to be == 'EDHOC operation failed'
+
+    session.instance_variable_set(:@native, native.new(1, 'peer rejected EAD', []))
+    expect(session.error_message.text).to be == 'peer rejected EAD'
+
+    session.instance_variable_set(:@native, native.new(3, nil, []))
+    expect(session.error_message.code).to be == :unknown_credential_referenced
   end
 
   it 'retains callback objects through GC compaction and closes idempotently' do

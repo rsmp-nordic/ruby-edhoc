@@ -5,11 +5,22 @@ require 'rake/extensiontask'
 require 'shellwords'
 require 'tmpdir'
 require 'yaml'
+require_relative 'tools/native_coverage'
 
 Rake::ExtensionTask.new('edhoc_native')
 
 task :test do
   sh 'bundle exec sus'
+end
+
+desc 'Run tests with enforced Ruby line and branch coverage thresholds'
+task :coverage do
+  sh({ 'RUBYOPT' => '-r./tools/ruby_coverage' }, 'bundle exec sus')
+end
+
+desc 'Rebuild with Clang and enforce native binding coverage thresholds'
+task :native_coverage do
+  NativeCoverage.run
 end
 
 task default: %i[compile test]

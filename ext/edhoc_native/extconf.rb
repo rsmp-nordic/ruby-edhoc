@@ -24,6 +24,8 @@ sanitizers = ENV['EDHOC_SANITIZERS']
 sanitizer_flags = if sanitizers && !sanitizers.empty?
                     "-fsanitize=#{sanitizers} -fno-omit-frame-pointer"
                   end
+native_coverage = ENV['EDHOC_NATIVE_COVERAGE'] == 'true'
+native_coverage_flags = '-fprofile-instr-generate -fcoverage-mapping -O0' if native_coverage
 cache = File.join(BUILD, "CMakeCache.txt")
 if File.file?(cache)
   cache_lines = File.readlines(cache)
@@ -89,6 +91,10 @@ $LDFLAGS << " -pthread"
 if sanitizer_flags
   $CFLAGS << " #{sanitizer_flags}"
   $LDFLAGS << " #{sanitizer_flags}"
+end
+if native_coverage_flags
+  $CFLAGS << " #{native_coverage_flags}"
+  $LDFLAGS << " #{native_coverage_flags}"
 end
 $srcs = %w[
   edhoc_native.c
