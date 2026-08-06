@@ -1,10 +1,10 @@
 module Edhoc
-  # Stateful EDHOC suite 4 handshake session backed by libedhoc.
-  class Suite4Session < Suite0Session
-    private
+  # Convenience preset for a generic session offering only suite 4.
+  class Suite4Session < Session
+    def initialize(**options)
+      raise ArgumentError, 'cipher_suites is fixed for Suite4Session' if options.key?(:cipher_suites)
 
-    def build_native_session(options)
-      Native::Suite4Session.new(*native_session_arguments(options))
+      super(**options, cipher_suites: [4])
     end
   end
 end

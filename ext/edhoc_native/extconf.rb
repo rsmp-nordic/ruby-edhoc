@@ -20,6 +20,10 @@ def cmake_cache_value(lines, key)
 end
 
 build_config = EdhocNative::BuildConfig.new
+sanitizers = ENV['EDHOC_SANITIZERS']
+sanitizer_flags = if sanitizers && !sanitizers.empty?
+                    "-fsanitize=#{sanitizers} -fno-omit-frame-pointer"
+                  end
 cache = File.join(BUILD, "CMakeCache.txt")
 if File.file?(cache)
   cache_lines = File.readlines(cache)
@@ -40,14 +44,22 @@ run!(
   "-DENABLE_PROGRAMS=OFF",
   "-DGEN_FILES=OFF",
   "-DCONFIG_LIBEDHOC_LOG_LEVEL=0",
+  "-DCONFIG_LIBEDHOC_MAX_NR_OF_METHODS=4",
+  "-DCONFIG_LIBEDHOC_MAX_NR_OF_CIPHER_SUITES=3",
+  "-DCONFIG_LIBEDHOC_MAX_NR_OF_CERTS_IN_X509_CHAIN=3",
+  "-DCONFIG_LIBEDHOC_MAX_NR_OF_EAD_TOKENS=3",
+  "-DCONFIG_LIBEDHOC_MAX_LEN_OF_KEM_ENCAPSULATION_KEY=97",
+  "-DCONFIG_LIBEDHOC_MAX_LEN_OF_KEM_CIPHERTEXT=97",
+  "-DCONFIG_LIBEDHOC_MAX_LEN_OF_MAC=48",
   "-DCONFIG_LIBEDHOC_MAX_LEN_OF_CRED_KEY_ID=32",
   "-DCONFIG_LIBEDHOC_CIPHER_SUITE_0_ENABLE=1",
-  "-DCONFIG_LIBEDHOC_CIPHER_SUITE_2_ENABLE=0",
+  "-DCONFIG_LIBEDHOC_CIPHER_SUITE_2_ENABLE=1",
   "-DCONFIG_LIBEDHOC_CIPHER_SUITE_4_ENABLE=1",
-  "-DCONFIG_LIBEDHOC_CIPHER_SUITE_24_ENABLE=0",
+  "-DCONFIG_LIBEDHOC_CIPHER_SUITE_24_ENABLE=1",
   "-DCONFIG_LIBEDHOC_CIPHER_SUITE_PQC_1_ENABLE=0",
   "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
-  "-DCMAKE_BUILD_TYPE=Release"
+  "-DCMAKE_BUILD_TYPE=Release",
+  "-DCMAKE_C_FLAGS=#{sanitizer_flags}"
 )
 run!("cmake", "--build", BUILD, "--config", "Release", "--target", "libedhoc")
 
@@ -56,7 +68,9 @@ vendor_include = [
   File.join(DEPENDENCY_BUILD, "include", "generated"),
   File.join(LIBEDHOC, "library", "internal"),
   File.join(LIBEDHOC, "library", "cipher_suites", "cipher_suite_0"),
+  File.join(LIBEDHOC, "library", "cipher_suites", "cipher_suite_2"),
   File.join(LIBEDHOC, "library", "cipher_suites", "cipher_suite_4"),
+  File.join(LIBEDHOC, "library", "cipher_suites", "cipher_suite_24"),
   File.join(LIBEDHOC, "backends", "cbor", "include"),
   File.join(LIBEDHOC, "backends", "log", "include"),
   File.join(LIBEDHOC, "externals", "zcbor", "include"),
@@ -72,11 +86,17 @@ vendor_include.each { |path| $INCFLAGS << " -I#{path.shellescape}" }
 
 $CFLAGS << " -std=gnu11 -pthread"
 $LDFLAGS << " -pthread"
+if sanitizer_flags
+  $CFLAGS << " #{sanitizer_flags}"
+  $LDFLAGS << " #{sanitizer_flags}"
+end
 $srcs = %w[
   edhoc_native.c
   edhoc_cipher_suites.c
   edhoc_cipher_suite_0.c
+  edhoc_cipher_suite_2.c
   edhoc_cipher_suite_4.c
+  edhoc_cipher_suite_24.c
 ]
 
 lib_paths = [
