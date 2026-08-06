@@ -19,13 +19,18 @@ module VendorLibedhoc
   ROOT = File.expand_path(__dir__)
   VENDOR_DIR = File.join(ROOT, 'vendor/libedhoc')
   METADATA_PATH = File.join(VENDOR_DIR, 'ruby-edhoc-vendor.yml')
+  GENERATED_DIR = File.join(ROOT, 'ext/edhoc_native/generated')
   REMOTE_URL = 'https://github.com/kamil-kielbasa/libedhoc.git'.freeze
   DEFAULT_REF = 'main'.freeze
+  TF_PSA_GENERATED_FILES = %w[
+    psa_crypto_driver_wrappers.h psa_crypto_driver_wrappers_no_static.c
+    tf_psa_crypto_config_check_before.h tf_psa_crypto_config_check_final.h
+    tf_psa_crypto_config_check_user.h
+  ].freeze
+  MBEDTLS_GENERATED_FILES = %w[error.c ssl_debug_helpers_generated.c version_features.c].freeze
   REQUIRED_EXTERNALS = %w[
-    externals/mbedtls
-    externals/zcbor
-    externals/compact25519
-    externals/Unity
+    externals/mbedtls externals/zcbor
+    externals/compact25519 externals/Unity
   ].freeze
 
   module_function
@@ -38,8 +43,10 @@ module VendorLibedhoc
       checkout = checkout_upstream(tmpdir, ref)
       commit = run('git', '-C', checkout, 'rev-parse', 'HEAD').strip
       metadata = metadata_for(checkout, ref, commit)
+      generated_dirs = generate_mbedtls_sources(checkout, tmpdir)
 
       copy_checkout(checkout)
+      copy_generated_sources(generated_dirs)
       File.write(METADATA_PATH, metadata.to_yaml)
       ensure_no_git_metadata!
 
@@ -91,6 +98,84 @@ module VendorLibedhoc
   def copy_checkout(checkout)
     FileUtils.mkdir_p(VENDOR_DIR)
     run!('rsync', '-a', '--delete', '--exclude', '.git', "#{checkout}/", "#{VENDOR_DIR}/")
+  end
+
+  def generate_mbedtls_sources(checkout, tmpdir)
+    mbedtls_root = File.join(checkout, 'externals/mbedtls')
+    mbedtls_output = File.join(tmpdir, 'mbedtls-generated')
+    tf_psa_output = File.join(tmpdir, 'tf-psa-generated')
+    python = ENV.fetch('PYTHON', 'python3')
+
+    ensure_generator_dependencies!(python)
+    FileUtils.mkdir_p(mbedtls_output)
+    FileUtils.mkdir_p(tf_psa_output)
+    generate_mbedtls_library_sources(mbedtls_root, mbedtls_output, python)
+    generate_tf_psa_sources(File.join(mbedtls_root, 'tf-psa-crypto'), tf_psa_output, python)
+
+    generated = {
+      'mbedtls' => [mbedtls_output, MBEDTLS_GENERATED_FILES],
+      'tf_psa_crypto' => [tf_psa_output, TF_PSA_GENERATED_FILES]
+    }
+    ensure_generated_sources!(generated)
+    generated.transform_values(&:first)
+  end
+
+  def ensure_generator_dependencies!(python)
+    _stdout, _stderr, status = Open3.capture3(python, '-c', 'import jinja2, jsonschema')
+    return if status.success?
+
+    requirements = File.join(
+      VENDOR_DIR, 'externals/mbedtls/tf-psa-crypto/scripts/driver.requirements.txt'
+    )
+    abort "Generating vendored TF-PSA sources requires Python build packages.\n" \
+          "Install them with: #{python} -m pip install -r #{requirements}"
+  end
+
+  def generate_mbedtls_library_sources(mbedtls_root, output_dir, python)
+    tf_psa_root = File.join(mbedtls_root, 'tf-psa-crypto')
+    run!(
+      'perl', File.join(mbedtls_root, 'scripts/generate_errors.pl'),
+      File.join(tf_psa_root, 'drivers/builtin/include/mbedtls'),
+      File.join(mbedtls_root, 'include/mbedtls'),
+      File.join(mbedtls_root, 'scripts/data_files'),
+      File.join(output_dir, 'error.c')
+    )
+    run!(
+      'perl', File.join(mbedtls_root, 'scripts/generate_features.pl'),
+      File.join(mbedtls_root, 'include/mbedtls'),
+      File.join(mbedtls_root, 'scripts/data_files'),
+      File.join(output_dir, 'version_features.c')
+    )
+    run!(
+      python, File.join(mbedtls_root, 'framework/scripts/generate_ssl_debug_helpers.py'),
+      '--mbedtls-root', mbedtls_root, output_dir
+    )
+  end
+
+  def generate_tf_psa_sources(tf_psa_root, output_dir, python)
+    Dir.chdir(tf_psa_root) do
+      run!(python, 'scripts/generate_driver_wrappers.py', output_dir)
+      run!(python, 'scripts/generate_config_checks.py', output_dir)
+    end
+  end
+
+  def ensure_generated_sources!(generated)
+    missing = generated.flat_map do |_name, (directory, files)|
+      files.reject { |file| File.file?(File.join(directory, file)) }
+    end
+    return if missing.empty?
+
+    abort "Mbed TLS generators did not create: #{missing.join(', ')}"
+  end
+
+  def copy_generated_sources(generated_dirs)
+    generated_dirs.each do |name, source_dir|
+      destination = File.join(GENERATED_DIR, name)
+      FileUtils.mkdir_p(destination)
+      Dir.glob(File.join(source_dir, '*')).each do |source|
+        FileUtils.cp(source, destination)
+      end
+    end
   end
 
   def metadata_for(checkout, ref, commit)

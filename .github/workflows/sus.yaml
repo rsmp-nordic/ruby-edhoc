@@ -19,9 +19,5 @@ jobs:
       with:
         ruby-version: ${{ matrix.ruby }}
         bundler-cache: true
-    - uses: actions/setup-python@v7
-      with:
-        python-version: '3.x'
-    - run: python -m pip install -r vendor/libedhoc/externals/mbedtls/tf-psa-crypto/scripts/driver.requirements.txt
     - run: bundle exec rake compile
     - run: bundle exec sus

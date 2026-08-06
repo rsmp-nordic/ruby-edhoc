@@ -30,13 +30,6 @@ The native extension requires:
 - Ruby development headers
 - CMake
 - a C compiler
-- Python 3 with the TF-PSA driver-generator requirements
-
-Install the Python build requirements with:
-
-```sh
-python3 -m pip install -r vendor/libedhoc/externals/mbedtls/tf-psa-crypto/scripts/driver.requirements.txt
-```
 
 On `mingw-ucrt` Ruby, the build selects CMake's MSYS Makefiles generator and
 GCC so that libedhoc and the Ruby extension use the same RubyInstaller/MSYS2
@@ -169,6 +162,15 @@ bundle exec rake 'vendor:update[v2.0.1]'
 
 The task refuses to run with uncommitted changes present. Review and commit the resulting
 `vendor/libedhoc` changes together with the updated metadata file.
+
+Refreshing the vendored sources also regenerates the Mbed TLS and TF-PSA C sources shipped in the gem.
+This maintainer-only step requires Perl, Python 3, and the driver-generator packages:
+
+```sh
+python3 -m pip install -r vendor/libedhoc/externals/mbedtls/tf-psa-crypto/scripts/driver.requirements.txt
+```
+
+Set `PYTHON` to select another Python executable when running `vendor:update`.
 
 After re-vendoring, compile the native extension and run the checks before committing:
 
