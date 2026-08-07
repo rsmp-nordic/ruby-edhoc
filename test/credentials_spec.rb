@@ -3,11 +3,12 @@ require_relative 'test_helper'
 class CapturingCredentialProvider
   attr_reader :received
 
-  def initialize(key:, identification:, peer_key:, peer_credential:)
+  def initialize(key:, identification:, peer_key:, peer_credential:, peer_format:)
     @key = key
     @identification = identification
     @peer_key = peer_key
     @peer_credential = peer_credential
+    @peer_format = peer_format
   end
 
   def select_local(_context)
@@ -18,7 +19,7 @@ class CapturingCredentialProvider
     @received = received
     Edhoc::TrustedCredential.new(
       credential: @peer_credential, public_key: @peer_key,
-      format: received.kind == :kid ? :cbor : :raw
+      format: @peer_format
     )
   end
 end
@@ -102,44 +103,30 @@ describe Edhoc::Credentials do
     responder&.close
   end
 
-  it 'round-trips raw and CBOR KID, one-to-three x5chain entries, and x5t forms' do
-    initiator_key = OpenSSL::PKey.generate_key('ED25519')
-    responder_key = OpenSSL::PKey.generate_key('ED25519')
+  it 'round-trips raw and CBOR KID credentials' do
+    keys = credential_keys
+    kid_cases.each { |credential_case| assert_credential_round_trip(keys, credential_case) }
+  end
+
+  it 'round-trips one-to-three x5chain entries' do
+    keys = credential_keys
+    initiator_key, responder_key = keys
     initiator_certificate = certificate('initiator', initiator_key)
     responder_certificate = certificate('responder', responder_key)
-    identifiers = [
-      [
-        Edhoc::Credentials::KID.new(identifier: 'i', credential: "\xa1\x01\x02".b, format: :cbor),
-        Edhoc::Credentials::KID.new(identifier: 'r', credential: "\xa1\x01\x03".b, format: :cbor),
-        "\xa1\x01\x02".b, "\xa1\x01\x03".b, :kid
-      ],
-      *x5chain_cases(initiator_certificate, responder_certificate),
-      *x5t_cases(initiator_certificate, responder_certificate)
-    ]
 
-    identifiers.each do |initiator_id, responder_id, initiator_cred, responder_cred, kind|
-      initiator_provider = CapturingCredentialProvider.new(
-        key: initiator_key, identification: initiator_id, peer_key: responder_key,
-        peer_credential: responder_cred
-      )
-      responder_provider = CapturingCredentialProvider.new(
-        key: responder_key, identification: responder_id, peer_key: initiator_key,
-        peer_credential: initiator_cred
-      )
-      initiator = Edhoc::Session.new(
-        role: :initiator, methods: [0], cipher_suites: [0], connection_id: -14,
-        credentials: initiator_provider
-      )
-      responder = Edhoc::Session.new(
-        role: :responder, methods: [0], cipher_suites: [0], connection_id: "\x18".b,
-        credentials: responder_provider
-      )
-      handshake(initiator, responder)
-      expect(initiator_provider.received.kind).to be == kind
-      expect(responder_provider.received.kind).to be == kind
-    ensure
-      initiator&.close
-      responder&.close
+    x5chain_cases(initiator_certificate, responder_certificate).each do |credential_case|
+      assert_credential_round_trip(keys, credential_case)
+    end
+  end
+
+  it 'round-trips x5t integer and text algorithm forms' do
+    keys = credential_keys
+    initiator_key, responder_key = keys
+    initiator_certificate = certificate('initiator', initiator_key)
+    responder_certificate = certificate('responder', responder_key)
+
+    x5t_cases(initiator_certificate, responder_certificate).each do |credential_case|
+      assert_credential_round_trip(keys, credential_case)
     end
   end
 
@@ -172,6 +159,52 @@ describe Edhoc::Credentials do
     end
     expect(caught.object_id).to be == callback_error.object_id
     expect(responder.state).to be == :aborted
+  ensure
+    initiator&.close
+    responder&.close
+  end
+
+  def credential_keys
+    [OpenSSL::PKey.generate_key('ED25519'), OpenSSL::PKey.generate_key('ED25519')]
+  end
+
+  def kid_cases
+    [
+      [
+        Edhoc::Credentials::KID.new(identifier: 'i', credential: 'initiator'.b, format: :raw),
+        Edhoc::Credentials::KID.new(identifier: 'r', credential: 'responder'.b, format: :raw),
+        'initiator'.b, 'responder'.b, :kid, :raw
+      ],
+      [
+        Edhoc::Credentials::KID.new(identifier: 'i', credential: "\xa1\x01\x02".b, format: :cbor),
+        Edhoc::Credentials::KID.new(identifier: 'r', credential: "\xa1\x01\x03".b, format: :cbor),
+        "\xa1\x01\x02".b, "\xa1\x01\x03".b, :kid, :cbor
+      ]
+    ]
+  end
+
+  def assert_credential_round_trip(keys, credential_case)
+    initiator_key, responder_key = keys
+    initiator_id, responder_id, initiator_cred, responder_cred, kind, format = credential_case
+    initiator_provider = CapturingCredentialProvider.new(
+      key: initiator_key, identification: initiator_id, peer_key: responder_key,
+      peer_credential: responder_cred, peer_format: format || :raw
+    )
+    responder_provider = CapturingCredentialProvider.new(
+      key: responder_key, identification: responder_id, peer_key: initiator_key,
+      peer_credential: initiator_cred, peer_format: format || :raw
+    )
+    initiator = Edhoc::Session.new(
+      role: :initiator, methods: [0], cipher_suites: [0], connection_id: -14,
+      credentials: initiator_provider
+    )
+    responder = Edhoc::Session.new(
+      role: :responder, methods: [0], cipher_suites: [0], connection_id: "\x18".b,
+      credentials: responder_provider
+    )
+    handshake(initiator, responder)
+    expect(initiator_provider.received.kind).to be == kind
+    expect(responder_provider.received.kind).to be == kind
   ensure
     initiator&.close
     responder&.close

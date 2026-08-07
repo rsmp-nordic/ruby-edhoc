@@ -3,20 +3,22 @@ require_relative 'test_helper'
 describe Edhoc::Session do
   include SessionTestHelpers
 
-  it 'completes all method and cipher-suite combinations with matching exporters' do
-    [0, 2, 4, 24].product((0..3).to_a).each do |suite, method|
-      initiator, responder = sessions(method: method, suites: [suite])
-      handshake(initiator, responder, message4: true)
+  [0, 2, 4, 24].each do |suite|
+    it "completes all methods with cipher suite #{suite} and matching exporters" do
+      (0..3).each do |method|
+        initiator, responder = sessions(method: method, suites: [suite])
+        handshake(initiator, responder, message4: true)
 
-      expect(initiator.state).to be == :persisted
-      expect(responder.state).to be == :persisted
-      expect(initiator.selected_method).to be == method
-      expect(initiator.selected_cipher_suite).to be == suite
-      expect(initiator.export(label: 0, length: 32)).to be ==
-                                                        responder.export(label: 0, length: 32)
-    ensure
-      initiator&.close
-      responder&.close
+        expect(initiator.state).to be == :persisted
+        expect(responder.state).to be == :persisted
+        expect(initiator.selected_method).to be == method
+        expect(initiator.selected_cipher_suite).to be == suite
+        expect(initiator.export(label: 0, length: 32)).to be ==
+                                                          responder.export(label: 0, length: 32)
+      ensure
+        initiator&.close
+        responder&.close
+      end
     end
   end
 
