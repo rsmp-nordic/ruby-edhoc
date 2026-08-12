@@ -5,6 +5,7 @@ require 'rake/extensiontask'
 require 'shellwords'
 require 'tmpdir'
 require 'yaml'
+require_relative 'tools/native_coverage'
 
 Rake::ExtensionTask.new('edhoc_native')
 
@@ -12,14 +13,26 @@ task :test do
   sh 'bundle exec sus'
 end
 
+desc 'Run tests with enforced Ruby line and branch coverage thresholds'
+task :coverage do
+  sh({ 'RUBYOPT' => '-r./tools/ruby_coverage' }, 'bundle exec sus')
+end
+
+desc 'Rebuild with Clang and enforce native binding coverage thresholds'
+task :native_coverage do
+  NativeCoverage.run
+end
+
 task default: %i[compile test]
 
 # Maintains the vendored libedhoc checkout used by the native extension.
+# rubocop:disable Metrics/ModuleLength
 module VendorLibedhoc
   ROOT = File.expand_path(__dir__)
   VENDOR_DIR = File.join(ROOT, 'vendor/libedhoc')
   METADATA_PATH = File.join(VENDOR_DIR, 'ruby-edhoc-vendor.yml')
   GENERATED_DIR = File.join(ROOT, 'ext/edhoc_native/generated')
+  PATCH_DIR = File.join(ROOT, 'patches/libedhoc')
   REMOTE_URL = 'https://github.com/kamil-kielbasa/libedhoc.git'.freeze
   DEFAULT_REF = 'main'.freeze
   TF_PSA_GENERATED_FILES = %w[
@@ -42,6 +55,7 @@ module VendorLibedhoc
     Dir.mktmpdir('ruby-edhoc-libedhoc-') do |tmpdir|
       checkout = checkout_upstream(tmpdir, ref)
       commit = run('git', '-C', checkout, 'rev-parse', 'HEAD').strip
+      apply_patches!(checkout)
       metadata = metadata_for(checkout, ref, commit)
       generated_dirs = generate_mbedtls_sources(checkout, tmpdir)
 
@@ -93,6 +107,14 @@ module VendorLibedhoc
 
     abort "Could not fetch libedhoc ref #{ref.inspect}; vendored files and metadata were not updated.\n" \
           "Command failed: #{command.shelljoin}"
+  end
+
+  def apply_patches!(checkout)
+    patches = Dir.glob(File.join(PATCH_DIR, '*.patch'))
+    patches.each do |patch|
+      run!('git', '-C', checkout, 'apply', '--check', patch)
+      run!('git', '-C', checkout, 'apply', patch)
+    end
   end
 
   def copy_checkout(checkout)
@@ -183,7 +205,8 @@ module VendorLibedhoc
       'libedhoc' => {
         'remote' => REMOTE_URL,
         'ref' => ref,
-        'commit' => commit
+        'commit' => commit,
+        'patches' => Dir.glob(File.join(PATCH_DIR, '*.patch')).map { |path| File.basename(path) }
       },
       'externals' => submodule_metadata(checkout)
     }
@@ -258,6 +281,7 @@ module VendorLibedhoc
     abort "Command failed: #{command.shelljoin}"
   end
 end
+# rubocop:enable Metrics/ModuleLength
 
 namespace :vendor do
   desc 'Update vendored libedhoc and its externals; pass [ref] to use a branch, tag, or commit'

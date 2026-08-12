@@ -1,10 +1,13 @@
-module Edhoc
-  class Error < StandardError
-  end
-end
-
 require_relative 'edhoc/version'
+require_relative 'edhoc/errors'
 require_relative 'edhoc/native'
-require_relative 'edhoc/test_vector'
+require_relative 'edhoc/call_context'
+require_relative 'edhoc/credentials'
+require_relative 'edhoc/ead'
+require_relative 'edhoc/error_message'
+require_relative 'edhoc/oscore_context'
+require_relative 'edhoc/coap'
+require_relative 'edhoc/session'
 require_relative 'edhoc/suite0_session'
 require_relative 'edhoc/suite4_session'
+require_relative 'edhoc/test_vector'
