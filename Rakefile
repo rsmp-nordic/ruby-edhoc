@@ -26,7 +26,7 @@ end
 task default: %i[compile test]
 
 # Maintains the vendored libedhoc checkout used by the native extension.
-# rubocop:disable Metrics/ModuleLength
+# rubocop:disable-next Metrics/ModuleLength
 module VendorLibedhoc
   ROOT = File.expand_path(__dir__)
   VENDOR_DIR = File.join(ROOT, 'vendor/libedhoc')
@@ -281,7 +281,6 @@ module VendorLibedhoc
     abort "Command failed: #{command.shelljoin}"
   end
 end
-# rubocop:enable Metrics/ModuleLength
 
 namespace :vendor do
   desc 'Update vendored libedhoc and its externals; pass [ref] to use a branch, tag, or commit'

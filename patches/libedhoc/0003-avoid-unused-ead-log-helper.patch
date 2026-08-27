@@ -1,0 +1,39 @@
+From: ruby-edhoc maintainers <ruby-edhoc@localhost>
+Subject: [PATCH] Avoid unused EAD log helper when logging is disabled
+
+The EAD message-number helper is only referenced by logging macros. At log
+level zero every reference is compiled out, leaving the static helper unused
+and causing Clang builds to fail because libedhoc enables -Werror.
+
+diff --git a/library/core/edhoc_ead_internal.c b/library/core/edhoc_ead_internal.c
+--- a/library/core/edhoc_ead_internal.c
++++ b/library/core/edhoc_ead_internal.c
+@@ -39,6 +39,7 @@
+ /* Static variables and constants ------------------------------------------ */
+ /* Static function declarations -------------------------------------------- */
+ 
++#if CONFIG_LIBEDHOC_LOG_LEVEL >= EDHOC_LOG_LEVEL_ERR
+ /**
+  * \brief Number of the message currently being handled, as it appears in the
+  *        EAD_x name.
+@@ -48,6 +49,7 @@
+  * \return Message number, one to four.
+  */
+ STATIC int comp_message_number(const struct edhoc_context *ctx);
++#endif
+ 
+ /**
+  * \brief Validate the items the application produced in \ref edhoc_ead.compose,
+@@ -67,10 +69,12 @@
+ 
+ /* Static function definitions --------------------------------------------- */
+ 
++#if CONFIG_LIBEDHOC_LOG_LEVEL >= EDHOC_LOG_LEVEL_ERR
+ STATIC int comp_message_number(const struct edhoc_context *ctx)
+ {
+ 	return (int)ctx->state.message + 1;
+ }
++#endif
+ 
+ STATIC int validate_composed(const struct edhoc_ead_token *tokens,
+ 			     size_t nr_of_tokens)

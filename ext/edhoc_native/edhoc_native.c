@@ -269,15 +269,17 @@ static int credentials_select_local(
 	int ret = import_authentication_key(session, private_key, static_dh);
 	if (ret != EDHOC_SUCCESS)
 		return ret;
-	memcpy(selected->private_key_id, &session->authentication_key,
+	struct edhoc_credential_selected_asymmetric *asymmetric =
+		&selected->asymmetric;
+	memcpy(asymmetric->private_key_id, &session->authentication_key,
 	       sizeof(session->authentication_key));
 
 	VALUE kind = hash_get(result, "kind");
 	if (symbol_is(kind, "kid")) {
-		selected->label = EDHOC_COSE_HEADER_KID;
-		selected->kid.identifier = ruby_buffer(hash_get(result, "identifier"));
-		selected->kid.credential = ruby_buffer(hash_get(result, "credential"));
-		selected->kid.format = symbol_is(hash_get(result, "format"), "cbor") ?
+		asymmetric->label = EDHOC_COSE_HEADER_KID;
+		asymmetric->kid.identifier = ruby_buffer(hash_get(result, "identifier"));
+		asymmetric->kid.credential = ruby_buffer(hash_get(result, "credential"));
+		asymmetric->kid.format = symbol_is(hash_get(result, "format"), "cbor") ?
 			EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED : EDHOC_CREDENTIAL_FORMAT_RAW;
 	} else if (symbol_is(kind, "x5chain")) {
 		VALUE certificates = hash_get(result, "certificates");
@@ -285,23 +287,23 @@ static int credentials_select_local(
 		long count = RARRAY_LEN(certificates);
 		if (count < 1 || count > EDHOC_CREDENTIAL_X5CHAIN_CAPACITY)
 			return EDHOC_ERROR_CREDENTIALS_FAILURE;
-		selected->label = EDHOC_COSE_HEADER_X509_CHAIN;
-		selected->x509_chain.count = (size_t)count;
+		asymmetric->label = EDHOC_COSE_HEADER_X509_CHAIN;
+		asymmetric->x509_chain.count = (size_t)count;
 		for (long i = 0; i < count; i++)
-			selected->x509_chain.certificate[i] =
+			asymmetric->x509_chain.certificate[i] =
 				ruby_buffer(rb_ary_entry(certificates, i));
 	} else if (symbol_is(kind, "x5t")) {
 		VALUE algorithm = hash_get(result, "algorithm");
-		selected->label = EDHOC_COSE_HEADER_X509_HASH;
+		asymmetric->label = EDHOC_COSE_HEADER_X509_HASH;
 		if (RB_INTEGER_TYPE_P(algorithm)) {
-			selected->x509_hash.algorithm.encode_type = EDHOC_ENCODE_TYPE_INTEGER;
-			selected->x509_hash.algorithm.integer = NUM2INT(algorithm);
+			asymmetric->x509_hash.algorithm.encode_type = EDHOC_ENCODE_TYPE_INTEGER;
+			asymmetric->x509_hash.algorithm.integer = NUM2INT(algorithm);
 		} else {
-			selected->x509_hash.algorithm.encode_type = EDHOC_ENCODE_TYPE_STRING;
-			selected->x509_hash.algorithm.string = ruby_buffer(algorithm);
+			asymmetric->x509_hash.algorithm.encode_type = EDHOC_ENCODE_TYPE_STRING;
+			asymmetric->x509_hash.algorithm.string = ruby_buffer(algorithm);
 		}
-		selected->x509_hash.fingerprint = ruby_buffer(hash_get(result, "fingerprint"));
-		selected->x509_hash.certificate = ruby_buffer(hash_get(result, "certificate"));
+		asymmetric->x509_hash.fingerprint = ruby_buffer(hash_get(result, "fingerprint"));
+		asymmetric->x509_hash.certificate = ruby_buffer(hash_get(result, "certificate"));
 	} else {
 		return EDHOC_ERROR_CREDENTIALS_FAILURE;
 	}
@@ -366,10 +368,10 @@ static int credentials_authenticate_peer(
 	session->selected_method = (int32_t)call_context->method;
 	session->selected_suite = call_context->selected_cipher_suite;
 	session->parameters_selected = true;
-	trusted->credential = ruby_buffer(hash_get(result, "credential"));
-	trusted->format = symbol_is(hash_get(result, "format"), "cbor") ?
+	trusted->asymmetric.credential = ruby_buffer(hash_get(result, "credential"));
+	trusted->asymmetric.format = symbol_is(hash_get(result, "format"), "cbor") ?
 		EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED : EDHOC_CREDENTIAL_FORMAT_RAW;
-	trusted->public_key = ruby_buffer(hash_get(result, "public_key"));
+	trusted->asymmetric.public_key = ruby_buffer(hash_get(result, "public_key"));
 	session->peer_id = hash_get(result, "peer_id");
 	return EDHOC_SUCCESS;
 }
@@ -516,6 +518,30 @@ static _Noreturn void raise_native_error(const char *operation, int code)
 	rb_ivar_set(exception, rb_intern("@local_cipher_suites"), rb_ary_new());
 	rb_ivar_set(exception, rb_intern("@peer_cipher_suites"), rb_ary_new());
 	rb_exc_raise(exception);
+}
+
+static struct edhoc_context *temporary_context(size_t *context_size)
+{
+	*context_size = edhoc_context_size();
+	struct edhoc_context *context = calloc(1, *context_size);
+	if (context == NULL)
+		rb_memerror();
+	int ret = edhoc_context_init(context);
+	if (ret != EDHOC_SUCCESS) {
+		secure_zero(context, *context_size);
+		free(context);
+		raise_native_error("edhoc_context_init", ret);
+	}
+	return context;
+}
+
+static int release_temporary_context(struct edhoc_context *context,
+				     size_t context_size)
+{
+	int ret = edhoc_context_deinit(context);
+	secure_zero(context, context_size);
+	free(context);
+	return ret;
 }
 
 static void record_error(struct ruby_edhoc_session *session, int code)
@@ -1167,7 +1193,13 @@ static VALUE native_error_compose(VALUE module, VALUE code_value, VALUE text_val
 	uint8_t *buffer = calloc(1, capacity);
 	if (buffer == NULL)
 		rb_memerror();
-	int ret = edhoc_message_error_compose(buffer, capacity, &length, code, &info);
+	size_t context_size;
+	struct edhoc_context *context = temporary_context(&context_size);
+	int ret = edhoc_message_error_compose(context, buffer, capacity, &length,
+		code, &info);
+	int release_ret = release_temporary_context(context, context_size);
+	if (ret == EDHOC_SUCCESS)
+		ret = release_ret;
 	VALUE output = ret == EDHOC_SUCCESS ? rb_str_new((char *)buffer, (long)length) : Qnil;
 	secure_zero(buffer, capacity);
 	free(buffer);
@@ -1189,8 +1221,14 @@ static VALUE native_error_parse(VALUE module, VALUE message)
 		.text_string = storage.text,
 		.entries_size = 65536,
 	};
-	int ret = edhoc_message_error_process((const uint8_t *)RSTRING_PTR(message),
+	size_t context_size;
+	struct edhoc_context *context = temporary_context(&context_size);
+	int ret = edhoc_message_error_process(context,
+		(const uint8_t *)RSTRING_PTR(message),
 		(size_t)RSTRING_LEN(message), &code, &info);
+	int release_ret = release_temporary_context(context, context_size);
+	if (ret == EDHOC_SUCCESS)
+		ret = release_ret;
 	if (ret != EDHOC_SUCCESS)
 		raise_native_error("error_message_parse", ret);
 	VALUE result = rb_hash_new();

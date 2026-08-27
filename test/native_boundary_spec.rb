@@ -36,7 +36,7 @@ describe Edhoc::Native do
 
   it 'reports its built-in backend and vendored API version' do
     expect(Edhoc::Native.profile).to be == 'built-in-crypto'
-    expect(Edhoc::Native.library_version.split('.').map { |part| Integer(part) }.length).to be == 3
+    expect(Edhoc::Native.library_version).to be == '2.2.0'
   end
 
   it 'defensively validates direct native constructor arguments' do
@@ -112,8 +112,8 @@ describe Edhoc::Native do
     with_sessions do |initiator, _responder|
       initiator.compose_message1
       error = captured_native_error { initiator.process_message2("\x40".b) }
-      expect(error).to be_a(Edhoc::BufferTooSmallError)
-      expect(error.code).to be == :buffer_too_small
+      expect(error).to be_a(Edhoc::MessageError)
+      expect(error.code).to be == :message_2_process_failure
     end
 
     with_sessions do |initiator, _responder|
@@ -130,9 +130,8 @@ describe Edhoc::Native do
       message2.setbyte(-1, message2.getbyte(-1) ^ 1)
       error = captured_native_error { initiator.process_message2(message2) }
       expect(error).to be_a(Edhoc::CryptoError)
-      # rubocop:disable Naming/VariableNumber
+      # rubocop:disable-next Naming/VariableNumber
       expect(error.code).to be == :invalid_sign_or_mac_2
-      # rubocop:enable Naming/VariableNumber
     end
 
     with_sessions do |initiator, responder|

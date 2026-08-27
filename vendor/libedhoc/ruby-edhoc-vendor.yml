@@ -1,11 +1,11 @@
 ---
 libedhoc:
   remote: https://github.com/kamil-kielbasa/libedhoc.git
-  ref: v2.0.1
-  commit: 2d8c75025a56c9530d255e33555724361d229b7a
+  ref: v2.2.0
+  commit: 161cc0c8c4ffcdf3f9da8759123f846b9d5cbe65
   patches:
-  - 0001-preserve-label-only-ead-in-message-1.patch
   - 0002-avoid-null-copy-for-empty-cbor-strings.patch
+  - 0003-avoid-unused-ead-log-helper.patch
 externals:
   Unity:
     path: externals/Unity

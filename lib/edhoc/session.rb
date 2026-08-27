@@ -16,7 +16,7 @@ module Edhoc
     attr_reader :role, :methods, :cipher_suites, :connection_id,
                 :max_message_size
 
-    # rubocop:disable Metrics/ParameterLists
+    # rubocop:disable-next Metrics/ParameterLists
     def initialize(role:, methods:, cipher_suites:, connection_id:, credentials:, ead: nil,
                    max_message_size: DEFAULT_MAX_MESSAGE_SIZE)
       @role = normalize_role(role)
@@ -30,7 +30,6 @@ module Edhoc
       @ead = ead && EAD::Bridge.new(ead)
       build_native!
     end
-    # rubocop:enable Metrics/ParameterLists
 
     def compose_message1 = @native.compose_message1
     def process_message1(message) = @native.process_message1(binary(message))
@@ -91,7 +90,7 @@ module Edhoc
     def closed? = @native.closed?
     def close = @native.close
 
-    # rubocop:disable Metrics/AbcSize
+    # rubocop:disable-next Metrics/AbcSize
     def diagnostics
       values = @native.diagnostics
       peer_suites = @peer_error_message&.cipher_suites || values.fetch(:peer_cipher_suites).reverse
@@ -106,7 +105,6 @@ module Edhoc
         closed: values.fetch(:closed)
       ).freeze
     end
-    # rubocop:enable Metrics/AbcSize
 
     private
 

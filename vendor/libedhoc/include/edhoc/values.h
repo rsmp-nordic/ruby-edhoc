@@ -110,6 +110,27 @@
 /** Maximum value for EDHOC exporter label for private usage. */
 #define EDHOC_PRK_EXPORTER_PRIVATE_LABEL_MAXIMUM ((size_t)65535)
 
+/** OSCORE Master Secret, for \ref edhoc_export and \ref edhoc_export_raw. */
+#define EDHOC_EXPORTER_LABEL_OSCORE_MASTER_SECRET ((size_t)0)
+
+/** OSCORE Master Salt, for \ref edhoc_export and \ref edhoc_export_raw. */
+#define EDHOC_EXPORTER_LABEL_OSCORE_MASTER_SALT ((size_t)1)
+
+/** Resumption PSK, for \ref edhoc_export_resumption_psk and
+ *  \ref edhoc_export_resumption_psk_raw.
+ *
+ *  draft-ietf-lake-edhoc-psk: 10.2 suggests 2, pending IANA assignment. */
+#define EDHOC_EXPORTER_LABEL_RESUMPTION_PSK ((size_t)2)
+
+/** Resumption 'kid', for \ref edhoc_export_resumption_kid_raw.
+ *
+ *  draft-ietf-lake-edhoc-psk: 10.2 suggests 3, pending IANA assignment. */
+#define EDHOC_EXPORTER_LABEL_RESUMPTION_KID ((size_t)3)
+
+/** Default length of the resumption 'kid'
+ *  (draft-ietf-lake-edhoc-psk: 6). */
+#define EDHOC_EXPORTER_RESUMPTION_KID_DEFAULT_LEN ((size_t)2)
+
 /* Module interface variables and constants -------------------------------- */
 /* Extern variables and constant declarations ------------------------------ */
 /* Module interface function declarations ---------------------------------- */
