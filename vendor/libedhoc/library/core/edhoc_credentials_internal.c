@@ -23,7 +23,7 @@ LOG_MODULE_DECLARE(libedhoc, CONFIG_LIBEDHOC_LOG_LEVEL);
 
 /* EDHOC internal headers: */
 #include "edhoc_macros_internal.h"
-#include "edhoc_common_internal.h"
+#include "edhoc_cbor_internal.h"
 #include "edhoc_credentials_internal.h"
 #include "edhoc_backend_log.h"
 
@@ -35,7 +35,7 @@ LOG_MODULE_DECLARE(libedhoc, CONFIG_LIBEDHOC_LOG_LEVEL);
 
 /* CBOR headers: */
 #include <zcbor_common.h>
-#include <backend_cbor_x509_types.h>
+#include <backend_cbor_types.h>
 #include <backend_cbor_id_cred_x_encode.h>
 #include <backend_cbor_int_type_encode.h>
 #include <backend_cbor_bstr_type_encode.h>
@@ -116,22 +116,36 @@ STATIC int parse_x5t(const struct COSE_CertHash *cert_hash,
 STATIC int copy_encoded_item(const struct edhoc_buffer *item, uint8_t *buffer,
 			     size_t buffer_length, size_t *length);
 
+/**
+ * \brief Apply the CRED_x serialization rule.
+ *
+ * \param format                Serialization of \p credential.
+ * \param[in] credential        CRED_x.
+ * \param[out] buffer           On success, CRED_x.
+ * \param buffer_length         Size of \p buffer in bytes.
+ * \param[out] length           On success, number of bytes written.
+ *
+ * \return EDHOC_SUCCESS on success, otherwise failure.
+ */
+STATIC int encode_cred(enum edhoc_credential_format format,
+		       const struct edhoc_buffer *credential, uint8_t *buffer,
+		       size_t buffer_length, size_t *length);
+
 /* Static function definitions --------------------------------------------- */
 
 STATIC size_t
 cbor_int_or_string_len(const struct edhoc_cbor_int_or_string *value)
 {
 	if (NULL == value) {
-		EDHOC_LOG_ERR("Invalid argument");
 		return 0;
 	}
 
 	switch (value->encode_type) {
 	case EDHOC_ENCODE_TYPE_INTEGER:
-		return edhoc_cbor_int_length(value->integer);
+		return edhoc_cbor_int_head_length(value->integer);
 	case EDHOC_ENCODE_TYPE_STRING:
 		return value->string.length +
-		       edhoc_cbor_bstr_header_length(value->string.length);
+		       edhoc_cbor_bstr_head_length(value->string.length);
 	default:
 		return 0;
 	}
@@ -146,7 +160,6 @@ STATIC int parse_x5chain(const struct COSE_X509_r *cose_x509,
 			 struct edhoc_credential_received *received)
 {
 	if (NULL == cose_x509 || NULL == received) {
-		EDHOC_LOG_ERR("Invalid arguments");
 		return EDHOC_ERROR_INVALID_ARGUMENT;
 	}
 
@@ -163,10 +176,6 @@ STATIC int parse_x5chain(const struct COSE_X509_r *cose_x509,
 	case COSE_X509_certs_l_c:
 		if (EDHOC_CREDENTIAL_X5CHAIN_CAPACITY <
 		    cose_x509->COSE_X509_certs_l_certs_count) {
-			EDHOC_LOG_ERR(
-				"X.509 certificate chain too large: %zu (max %d)",
-				cose_x509->COSE_X509_certs_l_certs_count,
-				EDHOC_CREDENTIAL_X5CHAIN_CAPACITY);
 			return EDHOC_ERROR_BUFFER_TOO_SMALL;
 		}
 
@@ -184,8 +193,6 @@ STATIC int parse_x5chain(const struct COSE_X509_r *cose_x509,
 		break;
 
 	default:
-		EDHOC_LOG_ERR("Invalid COSE_X509 choice: %d",
-			      cose_x509->COSE_X509_choice);
 		return EDHOC_ERROR_NOT_PERMITTED;
 	}
 
@@ -196,16 +203,11 @@ STATIC int parse_x5t(const struct COSE_CertHash *cert_hash,
 		     struct edhoc_credential_received *received)
 {
 	if (NULL == cert_hash || NULL == received) {
-		EDHOC_LOG_ERR("Invalid arguments");
 		return EDHOC_ERROR_INVALID_ARGUMENT;
 	}
 
 	if (EDHOC_CREDENTIAL_X5T_FINGERPRINT_MAX_LEN <
 	    cert_hash->COSE_CertHash_hashValue.len) {
-		EDHOC_LOG_ERR(
-			"X.509 certificate fingerprint too large: %zu (max %d)",
-			cert_hash->COSE_CertHash_hashValue.len,
-			EDHOC_CREDENTIAL_X5T_FINGERPRINT_MAX_LEN);
 		return EDHOC_ERROR_NOT_PERMITTED;
 	}
 
@@ -220,10 +222,6 @@ STATIC int parse_x5t(const struct COSE_CertHash *cert_hash,
 	case COSE_CertHash_hashAlg_tstr_c:
 		if (EDHOC_CREDENTIAL_X5T_ALGORITHM_MAX_LEN <
 		    cert_hash->COSE_CertHash_hashAlg_tstr.len) {
-			EDHOC_LOG_ERR(
-				"X.509 hash algorithm string too large: %zu (max %d)",
-				cert_hash->COSE_CertHash_hashAlg_tstr.len,
-				EDHOC_CREDENTIAL_X5T_ALGORITHM_MAX_LEN);
 			return EDHOC_ERROR_BUFFER_TOO_SMALL;
 		}
 
@@ -236,8 +234,6 @@ STATIC int parse_x5t(const struct COSE_CertHash *cert_hash,
 		break;
 
 	default:
-		EDHOC_LOG_ERR("Invalid COSE_CertHash_hashAlg choice: %d",
-			      cert_hash->COSE_CertHash_hashAlg_choice);
 		return EDHOC_ERROR_NOT_PERMITTED;
 	}
 
@@ -255,13 +251,10 @@ STATIC int copy_encoded_item(const struct edhoc_buffer *item, uint8_t *buffer,
 {
 	if (NULL == item || NULL == buffer || 0 == buffer_length ||
 	    NULL == length) {
-		EDHOC_LOG_ERR("Invalid arguments");
 		return EDHOC_ERROR_INVALID_ARGUMENT;
 	}
 
 	if (buffer_length < item->length) {
-		EDHOC_LOG_ERR("Buffer too small: %zu > %zu", item->length,
-			      buffer_length);
 		return EDHOC_ERROR_BUFFER_TOO_SMALL;
 	}
 
@@ -269,6 +262,39 @@ STATIC int copy_encoded_item(const struct edhoc_buffer *item, uint8_t *buffer,
 	*length = item->length;
 
 	return EDHOC_SUCCESS;
+}
+
+STATIC int encode_cred(enum edhoc_credential_format format,
+		       const struct edhoc_buffer *credential, uint8_t *buffer,
+		       size_t buffer_length, size_t *length)
+{
+	switch (format) {
+	case EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED:
+		return copy_encoded_item(credential, buffer, buffer_length,
+					 length);
+
+	case EDHOC_CREDENTIAL_FORMAT_RAW: {
+		const struct zcbor_string cred = {
+			.value = credential->value,
+			.len = credential->length,
+		};
+
+		const int ret = cbor_encode_byte_string_type_bstr_type(
+			buffer, buffer_length, &cred, length);
+
+		if (ZCBOR_SUCCESS != ret) {
+			EDHOC_LOG_ERR("CBOR enc CRED: %d", ret);
+			return EDHOC_ERROR_CBOR_FAILURE;
+		}
+
+		return EDHOC_SUCCESS;
+	}
+
+	case EDHOC_CREDENTIAL_FORMAT_NONE:
+	default:
+		EDHOC_LOG_ERR("Invalid credential format: %d", format);
+		return EDHOC_ERROR_NOT_PERMITTED;
+	}
 }
 
 /* Module interface function definitions ----------------------------------- */
@@ -323,7 +349,7 @@ int edhoc_credential_parse_kid_bstr(const uint8_t *key_id, size_t key_id_length,
 	return EDHOC_SUCCESS;
 }
 
-int edhoc_credential_parse_map(const struct map *id_cred_map,
+int edhoc_credential_parse_map(const struct id_cred_x *id_cred_map,
 			       struct edhoc_credential_received *received)
 {
 	if (NULL == id_cred_map || NULL == received) {
@@ -337,23 +363,26 @@ int edhoc_credential_parse_map(const struct map *id_cred_map,
 	 * means either that the peer ignored the mandatory compact encoding, or
 	 * that the map carries 'kid' alongside header parameters this library
 	 * does not support. In both cases the credential cannot be resolved. */
-	if (id_cred_map->map_kid_present) {
+	if (id_cred_map->id_cred_x_kid_present) {
 		EDHOC_LOG_ERR("ID_CRED 'kid' must use the compact encoding");
 		return EDHOC_ERROR_NOT_PERMITTED;
 	}
 
-	if (id_cred_map->map_x5chain_present && id_cred_map->map_x5t_present) {
+	if (id_cred_map->id_cred_x_x5chain_present &&
+	    id_cred_map->id_cred_x_x5t_present) {
 		EDHOC_LOG_ERR("Ambiguous ID_CRED: 'x5chain' and 'x5t'");
 		return EDHOC_ERROR_NOT_PERMITTED;
 	}
 
-	if (id_cred_map->map_x5chain_present) {
-		return parse_x5chain(&id_cred_map->map_x5chain.map_x5chain,
-				     received);
+	if (id_cred_map->id_cred_x_x5chain_present) {
+		return parse_x5chain(
+			&id_cred_map->id_cred_x_x5chain.id_cred_x_x5chain,
+			received);
 	}
 
-	if (id_cred_map->map_x5t_present) {
-		return parse_x5t(&id_cred_map->map_x5t.map_x5t, received);
+	if (id_cred_map->id_cred_x_x5t_present) {
+		return parse_x5t(&id_cred_map->id_cred_x_x5t.id_cred_x_x5t,
+				 received);
 	}
 
 	/* Header parameters outside the CDDL model are rejected earlier, by the
@@ -363,6 +392,7 @@ int edhoc_credential_parse_map(const struct map *id_cred_map,
 }
 
 int edhoc_credential_validate_selected(
+	enum edhoc_method method,
 	const struct edhoc_credential_selected *selected)
 {
 	if (NULL == selected) {
@@ -370,115 +400,197 @@ int edhoc_credential_validate_selected(
 		return EDHOC_ERROR_INVALID_ARGUMENT;
 	}
 
-	switch (selected->label) {
-	case EDHOC_COSE_HEADER_KID: {
-		const struct edhoc_credential_selected_kid *kid =
-			&selected->kid;
+	switch (method) {
+	case EDHOC_METHOD_0:
+	case EDHOC_METHOD_1:
+	case EDHOC_METHOD_2:
+	case EDHOC_METHOD_3:
+		switch (selected->asymmetric.label) {
+		case EDHOC_COSE_HEADER_KID: {
+			const struct edhoc_credential_selected_asymmetric_kid
+				*kid = &selected->asymmetric.kid;
 
-		/* An empty key identifier is legal (RFC 9528: Appendix F), a
-		 * length without a buffer is not. */
-		if (NULL == kid->identifier.value &&
-		    0 != kid->identifier.length) {
-			EDHOC_LOG_ERR("Key identifier without a buffer");
+			/* An empty key identifier is legal (RFC 9528:
+			 * Appendix F), a length without a buffer is not. */
+			if (NULL == kid->identifier.value &&
+			    0 != kid->identifier.length) {
+				EDHOC_LOG_ERR(
+					"Key identifier without a buffer");
+				return EDHOC_ERROR_CREDENTIALS_FAILURE;
+			}
+
+			if (EDHOC_CREDENTIAL_KID_MAX_LEN <
+			    kid->identifier.length) {
+				EDHOC_LOG_ERR(
+					"Key identifier too large: %zu (max %d)",
+					kid->identifier.length,
+					EDHOC_CREDENTIAL_KID_MAX_LEN);
+				return EDHOC_ERROR_BUFFER_TOO_SMALL;
+			}
+
+			if (is_buffer_empty(kid->credential.value,
+					    kid->credential.length)) {
+				EDHOC_LOG_ERR("Empty credential for 'kid'");
+				return EDHOC_ERROR_CREDENTIALS_FAILURE;
+			}
+
+			/* CRED may be a CBOR item (a CWT or a CCS) or opaque
+			 * bytes. */
+			if (EDHOC_CREDENTIAL_FORMAT_RAW != kid->format &&
+			    EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED !=
+				    kid->format) {
+				EDHOC_LOG_ERR("Invalid format for 'kid': %d",
+					      kid->format);
+				return EDHOC_ERROR_NOT_PERMITTED;
+			}
+			break;
+		}
+
+		case EDHOC_COSE_HEADER_X509_CHAIN: {
+			const size_t count =
+				selected->asymmetric.x509_chain.count;
+
+			if (0 == count ||
+			    EDHOC_CREDENTIAL_X5CHAIN_CAPACITY < count) {
+				EDHOC_LOG_ERR("Invalid X.509 chain length: %zu",
+					      count);
+				return EDHOC_ERROR_BUFFER_TOO_SMALL;
+			}
+
+			for (size_t i = 0; i < count; ++i) {
+				if (is_buffer_empty(
+					    selected->asymmetric.x509_chain
+						    .certificate[i]
+						    .value,
+					    selected->asymmetric.x509_chain
+						    .certificate[i]
+						    .length)) {
+					EDHOC_LOG_ERR(
+						"Empty X.509 certificate at index: %zu",
+						i);
+					return EDHOC_ERROR_CREDENTIALS_FAILURE;
+				}
+			}
+			break;
+		}
+
+		case EDHOC_COSE_HEADER_X509_HASH: {
+			const struct edhoc_credential_selected_asymmetric_x509_hash
+				*x509_hash = &selected->asymmetric.x509_hash;
+
+			if (is_buffer_empty(x509_hash->fingerprint.value,
+					    x509_hash->fingerprint.length)) {
+				EDHOC_LOG_ERR("Empty certificate fingerprint");
+				return EDHOC_ERROR_CREDENTIALS_FAILURE;
+			}
+
+			if (EDHOC_CREDENTIAL_X5T_FINGERPRINT_MAX_LEN <
+			    x509_hash->fingerprint.length) {
+				EDHOC_LOG_ERR(
+					"Certificate fingerprint too large: %zu (max %d)",
+					x509_hash->fingerprint.length,
+					EDHOC_CREDENTIAL_X5T_FINGERPRINT_MAX_LEN);
+				return EDHOC_ERROR_NOT_PERMITTED;
+			}
+
+			if (is_buffer_empty(x509_hash->certificate.value,
+					    x509_hash->certificate.length)) {
+				EDHOC_LOG_ERR("Empty certificate for 'x5t'");
+				return EDHOC_ERROR_CREDENTIALS_FAILURE;
+			}
+
+			switch (x509_hash->algorithm.encode_type) {
+			case EDHOC_ENCODE_TYPE_INTEGER:
+				break;
+
+			case EDHOC_ENCODE_TYPE_STRING:
+				if (EDHOC_CREDENTIAL_X5T_ALGORITHM_MAX_LEN <
+				    x509_hash->algorithm.string.length) {
+					EDHOC_LOG_ERR(
+						"Hash algorithm string too large: %zu (max %d)",
+						x509_hash->algorithm.string
+							.length,
+						EDHOC_CREDENTIAL_X5T_ALGORITHM_MAX_LEN);
+					return EDHOC_ERROR_BUFFER_TOO_SMALL;
+				}
+				break;
+
+			default:
+				EDHOC_LOG_ERR(
+					"Invalid hash algorithm encode type: %d",
+					x509_hash->algorithm.encode_type);
+				return EDHOC_ERROR_NOT_PERMITTED;
+			}
+			break;
+		}
+
+		case EDHOC_COSE_HEADER_NONE:
+		default:
+			EDHOC_LOG_ERR("Unsupported credential label: %d",
+				      selected->asymmetric.label);
+			return EDHOC_ERROR_NOT_SUPPORTED;
+		}
+		break;
+
+	case EDHOC_METHOD_4: {
+		const struct edhoc_credential_selected_psk *psk =
+			&selected->psk;
+
+		if (EDHOC_COSE_HEADER_NONE == psk->label) {
+			EDHOC_LOG_ERR(
+				"No identification method for ID_CRED_PSK");
 			return EDHOC_ERROR_CREDENTIALS_FAILURE;
 		}
 
-		if (EDHOC_CREDENTIAL_KID_MAX_LEN < kid->identifier.length) {
+		if (EDHOC_COSE_HEADER_KID != psk->label) {
+			EDHOC_LOG_ERR("Unsupported ID_CRED_PSK label: %d",
+				      psk->label);
+			return EDHOC_ERROR_NOT_PERMITTED;
+		}
+
+		if (is_buffer_empty(psk->kid.identifier.value,
+				    psk->kid.identifier.length)) {
+			EDHOC_LOG_ERR("Empty ID_CRED_PSK key identifier");
+			return EDHOC_ERROR_CREDENTIALS_FAILURE;
+		}
+
+		if (EDHOC_CREDENTIAL_KID_MAX_LEN < psk->kid.identifier.length) {
 			EDHOC_LOG_ERR("Key identifier too large: %zu (max %d)",
-				      kid->identifier.length,
+				      psk->kid.identifier.length,
 				      EDHOC_CREDENTIAL_KID_MAX_LEN);
 			return EDHOC_ERROR_BUFFER_TOO_SMALL;
 		}
 
-		if (is_buffer_empty(kid->credential.value,
-				    kid->credential.length)) {
-			EDHOC_LOG_ERR("Empty credential for 'kid'");
+		if (is_buffer_empty(psk->cred_i.value, psk->cred_i.length) ||
+		    is_buffer_empty(psk->cred_r.value, psk->cred_r.length)) {
+			EDHOC_LOG_ERR("Empty CRED_I or CRED_R");
 			return EDHOC_ERROR_CREDENTIALS_FAILURE;
 		}
 
-		/* CRED may be a CBOR item (a CWT or a CCS) or opaque bytes. */
-		if (EDHOC_CREDENTIAL_FORMAT_RAW != kid->format &&
-		    EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED != kid->format) {
-			EDHOC_LOG_ERR("Invalid format for 'kid': %d",
-				      kid->format);
-			return EDHOC_ERROR_NOT_PERMITTED;
-		}
-		break;
-	}
-
-	case EDHOC_COSE_HEADER_X509_CHAIN: {
-		const size_t count = selected->x509_chain.count;
-
-		if (0 == count || EDHOC_CREDENTIAL_X5CHAIN_CAPACITY < count) {
-			EDHOC_LOG_ERR("Invalid X.509 chain length: %zu", count);
-			return EDHOC_ERROR_BUFFER_TOO_SMALL;
-		}
-
-		for (size_t i = 0; i < count; ++i) {
-			if (is_buffer_empty(
-				    selected->x509_chain.certificate[i].value,
-				    selected->x509_chain.certificate[i].length)) {
-				EDHOC_LOG_ERR(
-					"Empty X.509 certificate at index: %zu",
-					i);
-				return EDHOC_ERROR_CREDENTIALS_FAILURE;
-			}
-		}
-		break;
-	}
-
-	case EDHOC_COSE_HEADER_X509_HASH: {
-		const struct edhoc_credential_selected_x509_hash *x509_hash =
-			&selected->x509_hash;
-
-		if (is_buffer_empty(x509_hash->fingerprint.value,
-				    x509_hash->fingerprint.length)) {
-			EDHOC_LOG_ERR("Empty certificate fingerprint");
+		if (psk->cred_i.length == psk->cred_r.length &&
+		    0 == memcmp(psk->cred_i.value, psk->cred_r.value,
+				psk->cred_i.length)) {
+			EDHOC_LOG_ERR("CRED_I and CRED_R are not distinct");
 			return EDHOC_ERROR_CREDENTIALS_FAILURE;
 		}
 
-		if (EDHOC_CREDENTIAL_X5T_FINGERPRINT_MAX_LEN <
-		    x509_hash->fingerprint.length) {
+		if (EDHOC_CREDENTIAL_FORMAT_NONE == psk->format) {
+			EDHOC_LOG_ERR("No format for CRED_I and CRED_R");
+			return EDHOC_ERROR_CREDENTIALS_FAILURE;
+		}
+
+		if (EDHOC_CREDENTIAL_FORMAT_RAW != psk->format &&
+		    EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED != psk->format) {
 			EDHOC_LOG_ERR(
-				"Certificate fingerprint too large: %zu (max %d)",
-				x509_hash->fingerprint.length,
-				EDHOC_CREDENTIAL_X5T_FINGERPRINT_MAX_LEN);
-			return EDHOC_ERROR_NOT_PERMITTED;
-		}
-
-		if (is_buffer_empty(x509_hash->certificate.value,
-				    x509_hash->certificate.length)) {
-			EDHOC_LOG_ERR("Empty certificate for 'x5t'");
-			return EDHOC_ERROR_CREDENTIALS_FAILURE;
-		}
-
-		switch (x509_hash->algorithm.encode_type) {
-		case EDHOC_ENCODE_TYPE_INTEGER:
-			break;
-
-		case EDHOC_ENCODE_TYPE_STRING:
-			if (EDHOC_CREDENTIAL_X5T_ALGORITHM_MAX_LEN <
-			    x509_hash->algorithm.string.length) {
-				EDHOC_LOG_ERR(
-					"Hash algorithm string too large: %zu (max %d)",
-					x509_hash->algorithm.string.length,
-					EDHOC_CREDENTIAL_X5T_ALGORITHM_MAX_LEN);
-				return EDHOC_ERROR_BUFFER_TOO_SMALL;
-			}
-			break;
-
-		default:
-			EDHOC_LOG_ERR("Invalid hash algorithm encode type: %d",
-				      x509_hash->algorithm.encode_type);
+				"Invalid format for CRED_I and CRED_R: %d",
+				psk->format);
 			return EDHOC_ERROR_NOT_PERMITTED;
 		}
 		break;
 	}
 
-	case EDHOC_COSE_HEADER_NONE:
 	default:
-		EDHOC_LOG_ERR("Unsupported credential label: %d",
-			      selected->label);
+		EDHOC_LOG_ERR("Unsupported method: %d", method);
 		return EDHOC_ERROR_NOT_SUPPORTED;
 	}
 
@@ -486,6 +598,7 @@ int edhoc_credential_validate_selected(
 }
 
 int edhoc_credential_validate_trusted(
+	enum edhoc_method method,
 	const struct edhoc_credential_received *received,
 	const struct edhoc_credential_trusted *trusted)
 {
@@ -494,57 +607,163 @@ int edhoc_credential_validate_trusted(
 		return EDHOC_ERROR_INVALID_ARGUMENT;
 	}
 
-	const bool no_credential = is_buffer_empty(trusted->credential.value,
-						   trusted->credential.length);
+	switch (method) {
+	case EDHOC_METHOD_0:
+	case EDHOC_METHOD_1:
+	case EDHOC_METHOD_2:
+	case EDHOC_METHOD_3: {
+		if (is_buffer_empty(trusted->asymmetric.credential.value,
+				    trusted->asymmetric.credential.length)) {
+			EDHOC_LOG_ERR("Empty peer credential");
+			return EDHOC_ERROR_CREDENTIALS_FAILURE;
+		}
 
-	if (no_credential) {
-		EDHOC_LOG_ERR("Empty peer credential");
-		return EDHOC_ERROR_CREDENTIALS_FAILURE;
+		if (is_buffer_empty(trusted->asymmetric.public_key.value,
+				    trusted->asymmetric.public_key.length)) {
+			EDHOC_LOG_ERR("Empty peer authentication key");
+			return EDHOC_ERROR_CREDENTIALS_FAILURE;
+		}
+
+		switch (received->label) {
+		case EDHOC_COSE_HEADER_KID:
+			/* CRED may be a CBOR item (a CWT or a CCS) or opaque
+			 * bytes. */
+			if (EDHOC_CREDENTIAL_FORMAT_RAW !=
+				    trusted->asymmetric.format &&
+			    EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED !=
+				    trusted->asymmetric.format) {
+				EDHOC_LOG_ERR("Invalid format for 'kid': %d",
+					      trusted->asymmetric.format);
+				return EDHOC_ERROR_NOT_PERMITTED;
+			}
+			break;
+
+		case EDHOC_COSE_HEADER_X509_CHAIN:
+		case EDHOC_COSE_HEADER_X509_HASH:
+			/* CRED is the DER certificate, never a CBOR item. */
+			if (EDHOC_CREDENTIAL_FORMAT_RAW !=
+			    trusted->asymmetric.format) {
+				EDHOC_LOG_ERR("Invalid format for X.509: %d",
+					      trusted->asymmetric.format);
+				return EDHOC_ERROR_NOT_PERMITTED;
+			}
+			break;
+
+		case EDHOC_COSE_HEADER_NONE:
+		default:
+			EDHOC_LOG_ERR("Unsupported credential label: %d",
+				      received->label);
+			return EDHOC_ERROR_NOT_SUPPORTED;
+		}
+		break;
 	}
 
-	const bool no_public_key = is_buffer_empty(trusted->public_key.value,
-						   trusted->public_key.length);
+	case EDHOC_METHOD_4: {
+		const struct edhoc_credential_trusted_psk *psk = &trusted->psk;
 
-	if (no_public_key) {
-		EDHOC_LOG_ERR("Empty peer authentication key");
-		return EDHOC_ERROR_CREDENTIALS_FAILURE;
-	}
+		if (is_buffer_empty(psk->cred_i.value, psk->cred_i.length) ||
+		    is_buffer_empty(psk->cred_r.value, psk->cred_r.length)) {
+			EDHOC_LOG_ERR("Empty CRED_I or CRED_R");
+			return EDHOC_ERROR_CREDENTIALS_FAILURE;
+		}
 
-	switch (received->label) {
-	case EDHOC_COSE_HEADER_KID:
-		/* CRED may be a CBOR item (a CWT or a CCS) or opaque bytes. */
-		if (EDHOC_CREDENTIAL_FORMAT_RAW != trusted->format &&
-		    EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED != trusted->format) {
-			EDHOC_LOG_ERR("Invalid format for 'kid': %d",
-				      trusted->format);
+		if (psk->cred_i.length == psk->cred_r.length &&
+		    0 == memcmp(psk->cred_i.value, psk->cred_r.value,
+				psk->cred_i.length)) {
+			EDHOC_LOG_ERR("CRED_I and CRED_R are not distinct");
+			return EDHOC_ERROR_CREDENTIALS_FAILURE;
+		}
+
+		if (EDHOC_CREDENTIAL_FORMAT_NONE == psk->format) {
+			EDHOC_LOG_ERR("No format for CRED_I and CRED_R");
+			return EDHOC_ERROR_CREDENTIALS_FAILURE;
+		}
+
+		if (EDHOC_CREDENTIAL_FORMAT_RAW != psk->format &&
+		    EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED != psk->format) {
+			EDHOC_LOG_ERR(
+				"Invalid format for CRED_I and CRED_R: %d",
+				psk->format);
 			return EDHOC_ERROR_NOT_PERMITTED;
 		}
 		break;
+	}
 
-	case EDHOC_COSE_HEADER_X509_CHAIN:
-	case EDHOC_COSE_HEADER_X509_HASH:
-		/* CRED is the DER certificate, never a CBOR item. */
-		if (EDHOC_CREDENTIAL_FORMAT_RAW != trusted->format) {
-			EDHOC_LOG_ERR("Invalid format for X.509: %d",
-				      trusted->format);
-			return EDHOC_ERROR_NOT_PERMITTED;
-		}
-		break;
-
-	case EDHOC_COSE_HEADER_NONE:
 	default:
-		EDHOC_LOG_ERR("Unsupported credential label: %d",
-			      received->label);
+		EDHOC_LOG_ERR("Unsupported method: %d", method);
 		return EDHOC_ERROR_NOT_SUPPORTED;
 	}
 
 	return EDHOC_SUCCESS;
 }
 
-int edhoc_credential_material_from_trusted(
+int edhoc_credential_asymmetric_material_from_selected(
+	const struct edhoc_credential_selected *selected,
+	struct edhoc_credential_material_asymmetric *material)
+{
+	if (NULL == selected || NULL == material) {
+		EDHOC_LOG_ERR("Invalid arguments");
+		return EDHOC_ERROR_INVALID_ARGUMENT;
+	}
+
+	memset(material, 0, sizeof(*material));
+
+	material->label = selected->asymmetric.label;
+
+	switch (selected->asymmetric.label) {
+	case EDHOC_COSE_HEADER_KID:
+		material->kid = selected->asymmetric.kid.identifier;
+		material->credential = selected->asymmetric.kid.credential;
+		material->format = selected->asymmetric.kid.format;
+		break;
+
+	case EDHOC_COSE_HEADER_X509_CHAIN: {
+		const size_t count = selected->asymmetric.x509_chain.count;
+
+		if (0 == count || EDHOC_CREDENTIAL_X5CHAIN_CAPACITY < count) {
+			EDHOC_LOG_ERR("Invalid X.509 chain length: %zu", count);
+			return EDHOC_ERROR_NOT_PERMITTED;
+		}
+
+		material->x509_chain.count = count;
+		for (size_t i = 0; i < count; ++i) {
+			material->x509_chain.certificate[i] =
+				selected->asymmetric.x509_chain.certificate[i];
+		}
+
+		/* CRED is the end-entity certificate, always the DER bytes. */
+		material->credential =
+			selected->asymmetric.x509_chain.certificate[0];
+		material->format = EDHOC_CREDENTIAL_FORMAT_RAW;
+		break;
+	}
+
+	case EDHOC_COSE_HEADER_X509_HASH:
+		material->x509_hash.algorithm =
+			selected->asymmetric.x509_hash.algorithm;
+		material->x509_hash.fingerprint =
+			selected->asymmetric.x509_hash.fingerprint;
+
+		/* CRED is the certificate the fingerprint identifies. */
+		material->credential =
+			selected->asymmetric.x509_hash.certificate;
+		material->format = EDHOC_CREDENTIAL_FORMAT_RAW;
+		break;
+
+	case EDHOC_COSE_HEADER_NONE:
+	default:
+		EDHOC_LOG_ERR("Unsupported credential label: %d",
+			      selected->asymmetric.label);
+		return EDHOC_ERROR_NOT_SUPPORTED;
+	}
+
+	return EDHOC_SUCCESS;
+}
+
+int edhoc_credential_asymmetric_material_from_trusted(
 	const struct edhoc_credential_received *received,
 	const struct edhoc_credential_trusted *trusted,
-	struct edhoc_credential_material *material)
+	struct edhoc_credential_material_asymmetric *material)
 {
 	if (NULL == received || NULL == trusted || NULL == material) {
 		EDHOC_LOG_ERR("Invalid arguments");
@@ -554,8 +773,8 @@ int edhoc_credential_material_from_trusted(
 	memset(material, 0, sizeof(*material));
 
 	material->label = received->label;
-	material->format = trusted->format;
-	material->credential = trusted->credential;
+	material->format = trusted->asymmetric.format;
+	material->credential = trusted->asymmetric.credential;
 
 	switch (received->label) {
 	case EDHOC_COSE_HEADER_KID:
@@ -595,68 +814,9 @@ int edhoc_credential_material_from_trusted(
 	return EDHOC_SUCCESS;
 }
 
-int edhoc_credential_material_from_selected(
-	const struct edhoc_credential_selected *selected,
-	struct edhoc_credential_material *material)
-{
-	if (NULL == selected || NULL == material) {
-		EDHOC_LOG_ERR("Invalid arguments");
-		return EDHOC_ERROR_INVALID_ARGUMENT;
-	}
-
-	memset(material, 0, sizeof(*material));
-
-	material->label = selected->label;
-
-	switch (selected->label) {
-	case EDHOC_COSE_HEADER_KID:
-		material->kid = selected->kid.identifier;
-		material->credential = selected->kid.credential;
-		material->format = selected->kid.format;
-		break;
-
-	case EDHOC_COSE_HEADER_X509_CHAIN: {
-		const size_t count = selected->x509_chain.count;
-
-		if (0 == count || EDHOC_CREDENTIAL_X5CHAIN_CAPACITY < count) {
-			EDHOC_LOG_ERR("Invalid X.509 chain length: %zu", count);
-			return EDHOC_ERROR_NOT_PERMITTED;
-		}
-
-		material->x509_chain.count = count;
-		for (size_t i = 0; i < count; ++i) {
-			material->x509_chain.certificate[i] =
-				selected->x509_chain.certificate[i];
-		}
-
-		/* CRED is the end-entity certificate, always the DER bytes. */
-		material->credential = selected->x509_chain.certificate[0];
-		material->format = EDHOC_CREDENTIAL_FORMAT_RAW;
-		break;
-	}
-
-	case EDHOC_COSE_HEADER_X509_HASH:
-		material->x509_hash.algorithm = selected->x509_hash.algorithm;
-		material->x509_hash.fingerprint =
-			selected->x509_hash.fingerprint;
-
-		/* CRED is the certificate the fingerprint identifies. */
-		material->credential = selected->x509_hash.certificate;
-		material->format = EDHOC_CREDENTIAL_FORMAT_RAW;
-		break;
-
-	case EDHOC_COSE_HEADER_NONE:
-	default:
-		EDHOC_LOG_ERR("Unsupported credential label: %d",
-			      selected->label);
-		return EDHOC_ERROR_NOT_SUPPORTED;
-	}
-
-	return EDHOC_SUCCESS;
-}
-
-int edhoc_credential_id_cred_length(
-	const struct edhoc_credential_material *material, size_t *length)
+int edhoc_credential_asymmetric_id_cred_length(
+	const struct edhoc_credential_material_asymmetric *material,
+	size_t *length)
 {
 	if (NULL == material || NULL == length) {
 		EDHOC_LOG_ERR("Invalid arguments");
@@ -665,12 +825,14 @@ int edhoc_credential_id_cred_length(
 
 	const size_t nr_of_items = 1;
 
-	*length = edhoc_cbor_map_oh(nr_of_items);
+	/* The COSE header label is the map key. */
+	*length = edhoc_cbor_map_head_length(nr_of_items) +
+		  edhoc_cbor_int_head_length((int32_t)material->label);
 
 	switch (material->label) {
 	case EDHOC_COSE_HEADER_KID:
 		*length += material->kid.length +
-			   edhoc_cbor_bstr_header_length(material->kid.length);
+			   edhoc_cbor_bstr_head_length(material->kid.length);
 		break;
 
 	case EDHOC_COSE_HEADER_X509_CHAIN:
@@ -678,22 +840,22 @@ int edhoc_credential_id_cred_length(
 			const size_t len =
 				material->x509_chain.certificate[i].length;
 
-			*length += len + edhoc_cbor_bstr_header_length(len);
+			*length += len + edhoc_cbor_bstr_head_length(len);
 		}
 
 		if (1 < material->x509_chain.count) {
-			*length +=
-				edhoc_cbor_array_oh(material->x509_chain.count);
+			*length += edhoc_cbor_array_head_length(
+				material->x509_chain.count);
 		}
 
 		break;
 
 	case EDHOC_COSE_HEADER_X509_HASH:
-		*length += edhoc_cbor_array_oh(nr_of_items);
+		*length += edhoc_cbor_array_head_length(nr_of_items);
 		*length +=
 			cbor_int_or_string_len(&material->x509_hash.algorithm);
 		*length += material->x509_hash.fingerprint.length;
-		*length += edhoc_cbor_bstr_header_length(
+		*length += edhoc_cbor_bstr_head_length(
 			material->x509_hash.fingerprint.length);
 		break;
 
@@ -707,8 +869,9 @@ int edhoc_credential_id_cred_length(
 	return EDHOC_SUCCESS;
 }
 
-int edhoc_credential_cred_length(
-	const struct edhoc_credential_material *material, size_t *length)
+int edhoc_credential_asymmetric_cred_length(
+	const struct edhoc_credential_material_asymmetric *material,
+	size_t *length)
 {
 	if (NULL == material || NULL == length) {
 		EDHOC_LOG_ERR("Invalid arguments");
@@ -729,14 +892,14 @@ int edhoc_credential_cred_length(
 	}
 
 	*length = material->credential.length +
-		  edhoc_cbor_bstr_header_length(material->credential.length);
+		  edhoc_cbor_bstr_head_length(material->credential.length);
 
 	return EDHOC_SUCCESS;
 }
 
-int edhoc_credential_encode_id_cred(
-	const struct edhoc_credential_material *material, uint8_t *buffer,
-	size_t buffer_length, size_t *length)
+int edhoc_credential_asymmetric_encode_id_cred(
+	const struct edhoc_credential_material_asymmetric *material,
+	uint8_t *buffer, size_t buffer_length, size_t *length)
 {
 	if (NULL == material || NULL == buffer || 0 == buffer_length ||
 	    NULL == length) {
@@ -845,9 +1008,9 @@ int edhoc_credential_encode_id_cred(
 	return EDHOC_SUCCESS;
 }
 
-int edhoc_credential_encode_id_cred_compact(
-	const struct edhoc_credential_material *material, uint8_t *buffer,
-	size_t buffer_length, size_t *length)
+int edhoc_credential_asymmetric_encode_id_cred_compact(
+	const struct edhoc_credential_material_asymmetric *material,
+	uint8_t *buffer, size_t buffer_length, size_t *length)
 {
 	if (NULL == material || NULL == buffer || 0 == buffer_length ||
 	    NULL == length) {
@@ -888,8 +1051,105 @@ int edhoc_credential_encode_id_cred_compact(
 	return EDHOC_SUCCESS;
 }
 
-int edhoc_credential_encode_cred(
-	const struct edhoc_credential_material *material, uint8_t *buffer,
+int edhoc_credential_asymmetric_encode_cred(
+	const struct edhoc_credential_material_asymmetric *material,
+	uint8_t *buffer, size_t buffer_length, size_t *length)
+{
+	if (NULL == material || NULL == buffer || 0 == buffer_length ||
+	    NULL == length) {
+		EDHOC_LOG_ERR("Invalid arguments");
+		return EDHOC_ERROR_INVALID_ARGUMENT;
+	}
+
+	return encode_cred(material->format, &material->credential, buffer,
+			   buffer_length, length);
+}
+
+int edhoc_credential_psk_material_from_selected(
+	const struct edhoc_credential_selected *selected,
+	struct edhoc_credential_material_psk *material)
+{
+	if (NULL == selected || NULL == material) {
+		EDHOC_LOG_ERR("Invalid arguments");
+		return EDHOC_ERROR_INVALID_ARGUMENT;
+	}
+
+	if (EDHOC_COSE_HEADER_KID != selected->psk.label) {
+		EDHOC_LOG_ERR("Unsupported ID_CRED_PSK label: %d",
+			      selected->psk.label);
+		return EDHOC_ERROR_NOT_SUPPORTED;
+	}
+
+	*material = (struct edhoc_credential_material_psk){
+		.kid = selected->psk.kid.identifier,
+		.format = selected->psk.format,
+		.cred_i = selected->psk.cred_i,
+		.cred_r = selected->psk.cred_r,
+	};
+
+	return EDHOC_SUCCESS;
+}
+
+int edhoc_credential_psk_material_from_trusted(
+	const struct edhoc_credential_received *received,
+	const struct edhoc_credential_trusted *trusted,
+	struct edhoc_credential_material_psk *material)
+{
+	if (NULL == received || NULL == trusted || NULL == material) {
+		EDHOC_LOG_ERR("Invalid arguments");
+		return EDHOC_ERROR_INVALID_ARGUMENT;
+	}
+
+	if (EDHOC_COSE_HEADER_KID != received->label) {
+		EDHOC_LOG_ERR("Unsupported ID_CRED_PSK label: %d",
+			      received->label);
+		return EDHOC_ERROR_NOT_SUPPORTED;
+	}
+
+	*material = (struct edhoc_credential_material_psk){
+		.kid = received->kid.identifier,
+		.format = trusted->psk.format,
+		.cred_i = trusted->psk.cred_i,
+		.cred_r = trusted->psk.cred_r,
+	};
+
+	return EDHOC_SUCCESS;
+}
+
+int edhoc_credential_psk_id_cred_length(
+	const struct edhoc_credential_material_psk *material, size_t *length)
+{
+	if (NULL == material || NULL == length) {
+		EDHOC_LOG_ERR("Invalid arguments");
+		return EDHOC_ERROR_INVALID_ARGUMENT;
+	}
+
+	*length = material->kid.length +
+		  edhoc_cbor_bstr_head_length(material->kid.length);
+
+	return EDHOC_SUCCESS;
+}
+
+int edhoc_credential_psk_creds_length(
+	const struct edhoc_credential_material_psk *material, size_t *length)
+{
+	if (NULL == material || NULL == length) {
+		EDHOC_LOG_ERR("Invalid arguments");
+		return EDHOC_ERROR_INVALID_ARGUMENT;
+	}
+
+	/* A ready CBOR item is embedded as it is, so the byte string header is
+	 * the upper bound for both formats. */
+	*length = material->cred_i.length +
+		  edhoc_cbor_bstr_head_length(material->cred_i.length) +
+		  material->cred_r.length +
+		  edhoc_cbor_bstr_head_length(material->cred_r.length);
+
+	return EDHOC_SUCCESS;
+}
+
+int edhoc_credential_psk_encode_id_cred(
+	const struct edhoc_credential_material_psk *material, uint8_t *buffer,
 	size_t buffer_length, size_t *length)
 {
 	if (NULL == material || NULL == buffer || 0 == buffer_length ||
@@ -898,32 +1158,63 @@ int edhoc_credential_encode_cred(
 		return EDHOC_ERROR_INVALID_ARGUMENT;
 	}
 
-	switch (material->format) {
-	case EDHOC_CREDENTIAL_FORMAT_CBOR_ENCODED:
-		return copy_encoded_item(&material->credential, buffer,
-					 buffer_length, length);
-
-	case EDHOC_CREDENTIAL_FORMAT_RAW: {
-		const struct zcbor_string cred = {
-			.value = material->credential.value,
-			.len = material->credential.length,
-		};
-
-		const int ret = cbor_encode_byte_string_type_bstr_type(
-			buffer, buffer_length, &cred, length);
-
-		if (ZCBOR_SUCCESS != ret) {
-			EDHOC_LOG_ERR("CBOR enc CRED: %d", ret);
-			return EDHOC_ERROR_CBOR_FAILURE;
-		}
+	/* RFC 9528: 3.3.2 - a byte string identifier that is one byte long and
+	 * whose byte is a complete CBOR integer travels as that integer.
+	 * Everything else is a plain byte string. */
+	if (1 == material->kid.length &&
+	    edhoc_cbor_is_one_byte_int(material->kid.value[0])) {
+		buffer[0] = material->kid.value[0];
+		*length = 1;
 
 		return EDHOC_SUCCESS;
 	}
 
-	case EDHOC_CREDENTIAL_FORMAT_NONE:
-	default:
-		EDHOC_LOG_ERR("Invalid credential format: %d",
-			      material->format);
-		return EDHOC_ERROR_NOT_PERMITTED;
+	const struct zcbor_string input = {
+		.value = material->kid.value,
+		.len = material->kid.length,
+	};
+
+	const int ret = cbor_encode_byte_string_type_bstr_type(
+		buffer, buffer_length, &input, length);
+
+	if (ZCBOR_SUCCESS != ret) {
+		EDHOC_LOG_ERR("CBOR enc ID_CRED_PSK: %d", ret);
+		return EDHOC_ERROR_CBOR_FAILURE;
 	}
+
+	return EDHOC_SUCCESS;
+}
+
+int edhoc_credential_psk_encode_creds(
+	const struct edhoc_credential_material_psk *material, uint8_t *buffer,
+	size_t buffer_length, size_t *cred_i_length, size_t *cred_r_length)
+{
+	if (NULL == material || NULL == buffer || 0 == buffer_length ||
+	    NULL == cred_i_length || NULL == cred_r_length) {
+		EDHOC_LOG_ERR("Invalid arguments");
+		return EDHOC_ERROR_INVALID_ARGUMENT;
+	}
+
+	int ret = encode_cred(material->format, &material->cred_i, buffer,
+			      buffer_length, cred_i_length);
+
+	if (EDHOC_SUCCESS != ret) {
+		EDHOC_LOG_ERR("CBOR enc CRED_I: %d", ret);
+		return ret;
+	}
+
+	if (buffer_length <= *cred_i_length) {
+		EDHOC_LOG_ERR("No room left for CRED_R: %zu", buffer_length);
+		return EDHOC_ERROR_BUFFER_TOO_SMALL;
+	}
+
+	ret = encode_cred(material->format, &material->cred_r,
+			  &buffer[*cred_i_length],
+			  buffer_length - *cred_i_length, cred_r_length);
+
+	if (EDHOC_SUCCESS != ret) {
+		EDHOC_LOG_ERR("CBOR enc CRED_R: %d", ret);
+	}
+
+	return ret;
 }

@@ -40,7 +40,7 @@
 #define EDHOC_API_VERSION_MAJOR 2
 
 /** Minor version of the EDHOC API. */
-#define EDHOC_API_VERSION_MINOR 0
+#define EDHOC_API_VERSION_MINOR 2
 
 /** Patch version of the EDHOC API. */
 #define EDHOC_API_VERSION_PATCH 0
@@ -441,6 +441,12 @@ int edhoc_message_4_process(struct edhoc_context *edhoc_context,
  *        is fatal and aborts the session (RFC 9528: 6). It carries an error
  *        code and matching error information.
  *
+ *        The session is aborted on entry, so it is aborted even if encoding
+ *        fails, and \p error_code is recorded for \ref edhoc_error_get_code().
+ *        A completed session is left untouched and rejected with
+ *        #EDHOC_ERROR_BAD_STATE (RFC 9528: 5.1).
+ *
+ * \param[in,out] edhoc_context         EDHOC context.
  * \param[out] message_error            Buffer where the generated message error is to be written.
  * \param message_error_size            Size of the \p message_error buffer in bytes.
  * \param[out] message_error_length     On success, the number of bytes that make up the message error.
@@ -451,7 +457,8 @@ int edhoc_message_4_process(struct edhoc_context *edhoc_context,
  *         Success.
  * \return Negative error code on failure (\ref edhoc-error-codes).
  */
-int edhoc_message_error_compose(uint8_t *message_error,
+int edhoc_message_error_compose(struct edhoc_context *edhoc_context,
+				uint8_t *message_error,
 				size_t message_error_size,
 				size_t *message_error_length,
 				enum edhoc_error_code error_code,
@@ -464,6 +471,16 @@ int edhoc_message_error_compose(uint8_t *message_error,
  *        information; receiving one indicates the peer aborted the session
  *        (RFC 9528: 6).
  *
+ *        The session is aborted on entry, so it is aborted even if decoding
+ *        fails. On success the received code reaches
+ *        \ref edhoc_error_get_code() and a received SUITES_R reaches
+ *        \ref edhoc_error_get_cipher_suites() as the peer suites.
+ *
+ *        A completed session is left untouched and rejected with
+ *        #EDHOC_ERROR_BAD_STATE: an error message is not authenticated and the
+ *        session output may be kept (RFC 9528: 5.1).
+ *
+ * \param[in,out] edhoc_context         EDHOC context.
  * \param[in] message_error             Buffer containing the message error.
  * \param message_error_length          Length of the \p message_error in bytes.
  * \param[out] error_code               EDHOC error code.
@@ -473,7 +490,8 @@ int edhoc_message_error_compose(uint8_t *message_error,
  *         Success.
  * \return Negative error code on failure (\ref edhoc-error-codes).
  */
-int edhoc_message_error_process(const uint8_t *message_error,
+int edhoc_message_error_process(struct edhoc_context *edhoc_context,
+				const uint8_t *message_error,
 				size_t message_error_length,
 				enum edhoc_error_code *error_code,
 				struct edhoc_error_info *error_info);
@@ -492,10 +510,14 @@ int edhoc_message_error_process(const uint8_t *message_error,
  * Permitted exporter labels (RFC 9528: 10.1) are:
  *   - 0, the OSCORE Master Secret;
  *   - 1, the OSCORE Master Salt;
+ *   - 2, the resumption PSK (draft-ietf-lake-edhoc-psk: 10.2);
+ *   - 3, the resumption 'kid' (draft-ietf-lake-edhoc-psk: 10.2);
  *   - the private-use range #EDHOC_PRK_EXPORTER_PRIVATE_LABEL_MINIMUM to
  *     #EDHOC_PRK_EXPORTER_PRIVATE_LABEL_MAXIMUM.
  *
- * Any other label is rejected with #EDHOC_ERROR_NOT_PERMITTED.
+ * Any other label is rejected with #EDHOC_ERROR_NOT_PERMITTED. Labels 2 and 3
+ * are open to every method: a session may yield a resumption key whatever it
+ * authenticated with (draft-ietf-lake-edhoc-psk: 6).
  * @{
  */
 
@@ -545,6 +567,66 @@ int edhoc_export(struct edhoc_context *edhoc_context, size_t label,
 int edhoc_export_raw(struct edhoc_context *edhoc_context, size_t label,
 		     const uint8_t *context, size_t context_length,
 		     uint8_t *secret, size_t secret_length);
+
+/**
+ * \brief Export the resumption PSK as a key handle.
+ *
+ *        Derives rPSK (draft-ietf-lake-edhoc-psk: 6) with an empty exporter
+ *        context. The derived length is set by \p usage, as in
+ *        \ref edhoc_export().
+ *
+ * \note  The returned handle is owned by the caller: the library neither tracks
+ *        it nor releases it in \ref edhoc_context_deinit(). Destroy it through
+ *        the \c destroy_key entry of the bound \ref edhoc_crypto vtable.
+ *
+ * \param[in,out] edhoc_context         EDHOC context.
+ * \param usage                         Intended usage of the derived key; governs its type and length.
+ * \param[out] key_id                   Buffer holding a key handle (\c CONFIG_LIBEDHOC_KEY_ID_LEN bytes) that receives the resumption PSK.
+ *
+ * \retval #EDHOC_SUCCESS
+ *         Success.
+ * \return Negative error code on failure (\ref edhoc-error-codes).
+ */
+int edhoc_export_resumption_psk(struct edhoc_context *edhoc_context,
+				enum edhoc_key_usage usage, void *key_id);
+
+/**
+ * \brief Export the resumption PSK as raw bytes.
+ *
+ *        Derives rPSK (draft-ietf-lake-edhoc-psk: 6) with an empty exporter
+ *        context. That section names the cipher suite hash length, while its
+ *        Appendix B.6 vector is 16 bytes long, so the length is left to the
+ *        caller.
+ *
+ * \param[in,out] edhoc_context         EDHOC context.
+ * \param[out] psk                      Buffer where the resumption PSK is to be written.
+ * \param psk_length                    Size of the \p psk buffer in bytes.
+ *
+ * \retval #EDHOC_SUCCESS
+ *         Success.
+ * \return Negative error code on failure (\ref edhoc-error-codes).
+ */
+int edhoc_export_resumption_psk_raw(struct edhoc_context *edhoc_context,
+				    uint8_t *psk, size_t psk_length);
+
+/**
+ * \brief Export the resumption 'kid' as raw bytes.
+ *
+ *        Derives rKID (draft-ietf-lake-edhoc-psk: 6) with an empty exporter
+ *        context. rKID identifies the resumption PSK rather than keying it, so
+ *        it has no key-handle form. Its default length is
+ *        #EDHOC_EXPORTER_RESUMPTION_KID_DEFAULT_LEN.
+ *
+ * \param[in,out] edhoc_context         EDHOC context.
+ * \param[out] kid                      Buffer where the resumption 'kid' is to be written.
+ * \param kid_length                    Size of the \p kid buffer in bytes.
+ *
+ * \retval #EDHOC_SUCCESS
+ *         Success.
+ * \return Negative error code on failure (\ref edhoc-error-codes).
+ */
+int edhoc_export_resumption_kid_raw(struct edhoc_context *edhoc_context,
+				    uint8_t *kid, size_t kid_length);
 
 /**
  * \brief Perform key update for subsequent OSCORE Security Context exports.
@@ -658,7 +740,9 @@ int edhoc_export_oscore_context_raw(
 /**
  * \brief Get the EDHOC error code recorded for the session.
  *
- * Returns the EDHOC error code (RFC 9528: 6) recorded in the context.
+ * Returns the EDHOC error code (RFC 9528: 6) recorded in the context, either by
+ * a message compose or process, or by \ref edhoc_message_error_compose() and
+ * \ref edhoc_message_error_process().
  *
  * \param[in] edhoc_context             EDHOC context.
  * \param[out] error_code               EDHOC error code.
@@ -674,11 +758,18 @@ int edhoc_error_get_code(const struct edhoc_context *edhoc_context,
  * \brief Retrieve the own and peer cipher suites after a cipher suite
  *        negotiation error.
  *
- * After the peer replies to message 1 with error code
- * #EDHOC_ERROR_CODE_WRONG_SELECTED_CIPHER_SUITE (RFC 9528: 6.3), this returns
- * the local supported suites (SUITES_I) and the peer's supported suites
- * (SUITES_R) so the Initiator can reselect a mutually supported suite for the
- * next message 1 (RFC 9528: 6.3.1).
+ * Available in either role once #EDHOC_ERROR_CODE_WRONG_SELECTED_CIPHER_SUITE
+ * is recorded for the session (RFC 9528: 6.3). The own suites are always the
+ * ones given to \ref edhoc_set_cipher_suites(); the peer suites are:
+ *   - the SUITES_I received in message 1, for a Responder that rejected it in
+ *     \ref edhoc_message_1_process();
+ *   - the SUITES_R of the error message, for an Initiator that decoded it in
+ *     \ref edhoc_message_error_process().
+ *
+ * The Responder builds SUITES_R for the error message out of the two lists. The
+ * Initiator reselects a mutually supported suite (RFC 9528: 6.3.1); the retry is
+ * a new EDHOC session, so it needs a reinitialized context and yields a fresh
+ * ephemeral key pair.
  *
  * \param[in] edhoc_context             EDHOC context.
  * \param[out] cipher_suites            Buffer where the own cipher suite values are written.
