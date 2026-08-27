@@ -130,9 +130,8 @@ describe Edhoc::Native do
       message2.setbyte(-1, message2.getbyte(-1) ^ 1)
       error = captured_native_error { initiator.process_message2(message2) }
       expect(error).to be_a(Edhoc::CryptoError)
-      # rubocop:disable Naming/VariableNumber
+      # rubocop:disable-next Naming/VariableNumber
       expect(error.code).to be == :invalid_sign_or_mac_2
-      # rubocop:enable Naming/VariableNumber
     end
 
     with_sessions do |initiator, responder|
